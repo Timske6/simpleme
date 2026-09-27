@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/orientable",
+  "textures": {
+    "front": "simpleme:block/terminal_front",
+    "side": "simpleme:block/terminal_side",
+    "top": "simpleme:block/terminal_top"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "block.simpleme.terminal": "ME Terminal",
+  "container.simpleme.terminal": "ME Terminal",
+  "tooltip.simpleme.stored": "Stores %s items (%s types)",
+  "tooltip.simpleme.empty": "Empty",
+  "gui.simpleme.search": "Search",
+  "gui.simpleme.search.hint": "Search... (@mod)",
+  "gui.simpleme.stored": "Stored: %s",
+  "gui.simpleme.clear_grid": "Move crafting grid back into storage",
+  "gui.simpleme.sort.name": "Sort: Name",
+  "gui.simpleme.sort.count": "Sort: Amount",
+  "gui.simpleme.sort.mod": "Sort: Mod"
+}

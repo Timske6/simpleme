@@ -1,0 +1,13 @@
+{
+  "block.simpleme.terminal": "ME-Terminal",
+  "container.simpleme.terminal": "ME-Terminal",
+  "tooltip.simpleme.stored": "Enthält %s Items (%s Sorten)",
+  "tooltip.simpleme.empty": "Leer",
+  "gui.simpleme.search": "Suche",
+  "gui.simpleme.search.hint": "Suchen... (@mod)",
+  "gui.simpleme.stored": "Gespeichert: %s",
+  "gui.simpleme.clear_grid": "Werkbankraster zurück in den Speicher legen",
+  "gui.simpleme.sort.name": "Sortierung: Name",
+  "gui.simpleme.sort.count": "Sortierung: Anzahl",
+  "gui.simpleme.sort.mod": "Sortierung: Mod"
+}

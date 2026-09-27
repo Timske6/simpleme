@@ -1,0 +1,20 @@
+{
+	"schemaVersion": 1,
+	"id": "simpleme-test",
+	"version": "1.0.0",
+	"name": "Simple ME Terminal Tests",
+	"environment": "*",
+	"entrypoints": {
+		"fabric-client-gametest": [
+			"io.github.timske6.simpleme.test.TerminalClientGameTest",
+			"io.github.timske6.simpleme.test.TerminalGuiClientTest",
+			"io.github.timske6.simpleme.test.TerminalDedicatedServerTest"
+		],
+		"fabric-gametest": [
+			"io.github.timske6.simpleme.test.TerminalGameTests"
+		]
+	},
+	"depends": {
+		"simpleme": "*"
+	}
+}

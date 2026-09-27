@@ -1,0 +1,141 @@
+"""Generates the block textures and mod icon for Simple ME Terminal.
+
+Pure Python (no Pillow needed). Run from the project root:
+    python tools/gen_textures.py
+"""
+import os
+import random
+import struct
+import zlib
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEX = os.path.join(ROOT, "src", "main", "resources", "assets", "simpleme", "textures", "block")
+ICON = os.path.join(ROOT, "src", "main", "resources", "assets", "simpleme", "icon.png")
+
+
+def write_png(path, pixels, w, h):
+    raw = b""
+    for y in range(h):
+        raw += b"\x00"
+        for x in range(w):
+            raw += bytes(pixels[y * w + x])
+
+    def chunk(tag, data):
+        c = struct.pack(">I", len(data)) + tag + data
+        return c + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    png = b"\x89PNG\r\n\x1a\n"
+    png += chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+    png += chunk(b"IDAT", zlib.compress(raw, 9))
+    png += chunk(b"IEND", b"")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(png)
+
+
+def rgb(hex_str, a=255):
+    hex_str = hex_str.lstrip("#")
+    return (int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16), a)
+
+
+def shade(c, d):
+    return (max(0, min(255, c[0] + d)), max(0, min(255, c[1] + d)), max(0, min(255, c[2] + d)), c[3])
+
+
+def casing(seed):
+    """Metal casing: light bevelled frame with a darker recessed centre."""
+    rnd = random.Random(seed)
+    px = [None] * 256
+    base = rgb("8a8f99")
+    for y in range(16):
+        for x in range(16):
+            c = shade(base, rnd.randint(-6, 6))
+            if x == 0 or y == 0:
+                c = shade(base, 38)
+            elif x == 15 or y == 15:
+                c = shade(base, -48)
+            elif x == 1 or y == 1:
+                c = shade(base, 18)
+            elif x == 14 or y == 14:
+                c = shade(base, -26)
+            px[y * 16 + x] = c
+    # rivets in the corners
+    for (x, y) in ((2, 2), (13, 2), (2, 13), (13, 13)):
+        px[y * 16 + x] = rgb("c9ced6")
+        px[(y + 1) * 16 + x] = shade(base, -30) if y < 15 else px[(y + 1) * 16 + x]
+    return px
+
+
+def side():
+    px = casing(1)
+    inner = rgb("5b6069")
+    for y in range(4, 12):
+        for x in range(4, 12):
+            c = inner
+            if x == 4 or y == 4:
+                c = shade(inner, -22)
+            elif x == 11 or y == 11:
+                c = shade(inner, 26)
+            px[y * 16 + x] = c
+    # small cyan status line
+    for x in range(6, 10):
+        px[7 * 16 + x] = rgb("3fd8e6")
+        px[8 * 16 + x] = rgb("1f8fa0")
+    return px
+
+
+def top():
+    px = casing(2)
+    vent = rgb("3e424a")
+    for y in (4, 6, 8, 10):
+        for x in range(4, 12):
+            px[y * 16 + x] = vent
+            px[(y + 1) * 16 + x] = shade(px[(y + 1) * 16 + x], 12)
+    return px
+
+
+def front():
+    px = casing(3)
+    rnd = random.Random(42)
+    screen = rgb("0e1a24")
+    for y in range(2, 14):
+        for x in range(2, 14):
+            c = screen
+            if x == 2 or y == 2:
+                c = rgb("05090d")
+            elif x == 13 or y == 13:
+                c = rgb("2a3a46")
+            px[y * 16 + x] = c
+    # item "cells" on the screen
+    palette = [rgb("3fd8e6"), rgb("59f0a0"), rgb("f0c75e"), rgb("e27b5b"), rgb("9b8cf2"), rgb("3fd8e6")]
+    for gy in range(3):
+        for gx in range(3):
+            x0 = 4 + gx * 3
+            y0 = 4 + gy * 3
+            if rnd.random() < 0.85:
+                col = palette[rnd.randrange(len(palette))]
+                px[y0 * 16 + x0] = col
+                px[y0 * 16 + x0 + 1] = shade(col, -40)
+                px[(y0 + 1) * 16 + x0] = shade(col, -40)
+                px[(y0 + 1) * 16 + x0 + 1] = shade(col, -80)
+    # glowing bottom line
+    for x in range(4, 12):
+        px[12 * 16 + x] = rgb("1f8fa0")
+    return px
+
+
+def upscale(px, factor):
+    out = []
+    size = 16 * factor
+    for y in range(size):
+        for x in range(size):
+            out.append(px[(y // factor) * 16 + (x // factor)])
+    return out
+
+
+if __name__ == "__main__":
+    write_png(os.path.join(TEX, "terminal_side.png"), side(), 16, 16)
+    write_png(os.path.join(TEX, "terminal_top.png"), top(), 16, 16)
+    write_png(os.path.join(TEX, "terminal_front.png"), front(), 16, 16)
+    write_png(ICON, upscale(front(), 8), 128, 128)
+    print("textures written to", TEX)

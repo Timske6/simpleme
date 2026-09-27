@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "simpleme:block/terminal" },
+    "facing=east": { "model": "simpleme:block/terminal", "y": 90 },
+    "facing=south": { "model": "simpleme:block/terminal", "y": 180 },
+    "facing=west": { "model": "simpleme:block/terminal", "y": 270 }
+  }
+}

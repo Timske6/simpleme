@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "G": "minecraft:glass_pane",
+    "R": "minecraft:redstone",
+    "C": "#c:chests/wooden",
+    "D": "minecraft:diamond"
+  },
+  "pattern": [
+    "IGI",
+    "RCR",
+    "IDI"
+  ],
+  "result": {
+    "id": "simpleme:terminal"
+  }
+}
