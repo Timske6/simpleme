@@ -5,6 +5,9 @@ Keine Laufwerke, keine Speicherzellen, keine Kabel. Block hinstellen, rechtsklic
 
 Quellcode und Fehlermeldungen: https://github.com/Timske6/simpleme
 
+> **Minecraft 1.7.10 / GT New Horizons?** Die Forge-Version für 1.7.10 (getestet mit GTNH 2.8.4, mit NEI-Integration)
+> liegt im Branch [`1.7.10`](https://github.com/Timske6/simpleme/tree/1.7.10).
+
 ## Features
 
 - **Unbegrenzter Speicher**: beliebig viele Item-Sorten, pro Sorte praktisch unbegrenzte Anzahl.
