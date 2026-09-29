@@ -1,0 +1,9 @@
+/*
+ * Dependencies. NEI is optional at runtime (recipe transfer + R/U keys on terminal items),
+ * but compiled against so the integration can be built in.
+ */
+dependencies {
+    // same NEI version as GT New Horizons 2.8.4
+    compileOnly("com.github.GTNewHorizons:NotEnoughItems:2.8.44-GTNH:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.8.44-GTNH:dev")
+}

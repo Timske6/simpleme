@@ -1,0 +1,20 @@
+{
+	"modListVersion": 2,
+	"modList": [{
+		"modid": "${modId}",
+		"name": "${modName}",
+		"description": "One block that stores everything, shows all items and lets you craft directly from storage.",
+		"version": "${modVersion}",
+		"mcversion": "${minecraftVersion}",
+		"url": "https://github.com/Timske6/simpleme",
+		"authorList": ["Timske6"],
+		"credits": "",
+		"logoFile": "assets/simpleme/icon.png",
+		"screenshots": [],
+		"parent": "",
+		"requiredMods": [],
+		"dependencies": [],
+		"dependants": [],
+		"useDependencyInformation": false
+	}]
+}
