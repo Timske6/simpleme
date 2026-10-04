@@ -18,6 +18,8 @@ Quellcode und Fehlermeldungen: https://github.com/Timske6/simpleme
   sind nur Zugänge dazu, beliebig viele pro Netzwerk. Netzwerke sind privat oder öffentlich (siehe unten).
 - **Übersicht über alle Items** mit Suchfeld, Scrollbar und Sortierung (Name / Anzahl / Mod).
   Große Mengen werden kompakt angezeigt (z. B. `12.3k`, `1.5M`), die genaue Zahl steht im Tooltip.
+  Die Reihenfolge bleibt stehen, solange das Terminal offen ist: Beim Herausnehmen springt nichts herum,
+  eine leer genommene Sorte zeigt `0`. Neu sortiert (und leere Sorten entfernt) wird beim nächsten Öffnen.
 - **Crafting direkt aus dem Netzwerk**:
   - 3×3-Werkbank im Terminal. Nach jedem Craft füllt sich das Raster automatisch aus dem Netzwerk nach.
   - **Rezeptbuch**: Rezept anklicken, dann werden die Zutaten direkt aus dem Netzwerk (und dem Inventar) eingelegt.

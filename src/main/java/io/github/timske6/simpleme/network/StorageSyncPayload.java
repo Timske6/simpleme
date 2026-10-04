@@ -11,8 +11,10 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 /**
  * Server → client: changes of the terminal contents. With {@code reset} the client replaces its
  * whole view, otherwise each entry sets the new count of one item type (0 = removed).
+ * {@code full} marks all packets of a complete sync (menu opened, network switched): only then
+ * the client sorts the list again.
  */
-public record StorageSyncPayload(int containerId, boolean reset, List<StoredItems.Entry> entries) implements CustomPacketPayload {
+public record StorageSyncPayload(int containerId, boolean reset, boolean full, List<StoredItems.Entry> entries) implements CustomPacketPayload {
 	public static final int MAX_SIZE = 32 * 1024 * 1024;
 	/** Entries per packet; larger updates are split into several packets. */
 	public static final int MAX_ENTRIES = 256;
@@ -20,6 +22,7 @@ public record StorageSyncPayload(int containerId, boolean reset, List<StoredItem
 	public static final StreamCodec<RegistryFriendlyByteBuf, StorageSyncPayload> CODEC = StreamCodec.composite(
 		ByteBufCodecs.VAR_INT, StorageSyncPayload::containerId,
 		ByteBufCodecs.BOOL, StorageSyncPayload::reset,
+		ByteBufCodecs.BOOL, StorageSyncPayload::full,
 		StoredItems.Entry.STREAM_CODEC.apply(ByteBufCodecs.list()), StorageSyncPayload::entries,
 		StorageSyncPayload::new
 	);

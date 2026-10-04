@@ -103,6 +103,7 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 	// client side mirror of the storage
 	private final Object2LongLinkedOpenHashMap<ItemVariant> clientItems = new Object2LongLinkedOpenHashMap<>();
 	private int clientRevision;
+	private int clientFullSyncs;
 	private final NetworkClientState networkState = new NetworkClientState();
 
 	/** Client constructor of the placed terminal (called through the menu type with the block position). */
@@ -260,7 +261,7 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 			this.lastSentVersion = Long.MIN_VALUE;
 			if (storage == null) {
 				this.lastSent.clear();
-				ServerPlayNetworking.send(serverPlayer, new StorageSyncPayload(this.containerId, true, List.of()));
+				ServerPlayNetworking.send(serverPlayer, new StorageSyncPayload(this.containerId, true, true, List.of()));
 				return;
 			}
 		}
@@ -300,12 +301,12 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 			}
 		}
 		if (reset && changes.isEmpty()) {
-			ServerPlayNetworking.send(serverPlayer, new StorageSyncPayload(this.containerId, true, List.of()));
+			ServerPlayNetworking.send(serverPlayer, new StorageSyncPayload(this.containerId, true, true, List.of()));
 		}
 		// Split big updates so a single packet never gets huge (e.g. a storage full of written books).
 		for (int start = 0; start < changes.size(); start += StorageSyncPayload.MAX_ENTRIES) {
 			List<StoredItems.Entry> batch = changes.subList(start, Math.min(changes.size(), start + StorageSyncPayload.MAX_ENTRIES));
-			ServerPlayNetworking.send(serverPlayer, new StorageSyncPayload(this.containerId, reset && start == 0, List.copyOf(batch)));
+			ServerPlayNetworking.send(serverPlayer, new StorageSyncPayload(this.containerId, reset && start == 0, reset, List.copyOf(batch)));
 		}
 	}
 
@@ -313,6 +314,9 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 	public void applySync(StorageSyncPayload payload) {
 		if (payload.reset()) {
 			this.clientItems.clear();
+		}
+		if (payload.full()) {
+			this.clientFullSyncs++;
 		}
 		for (StoredItems.Entry entry : payload.entries()) {
 			if (entry.count() <= 0) {
@@ -332,6 +336,11 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 	/** Client: changes every time the synced contents change. */
 	public int getClientRevision() {
 		return this.clientRevision;
+	}
+
+	/** Client: changes with every packet of a complete sync (menu opened, network switched). */
+	public int getClientFullSyncs() {
+		return this.clientFullSyncs;
 	}
 
 	// ------------------------------------------------------------------------------------------

@@ -9,6 +9,8 @@ import io.github.timske6.simpleme.menu.TerminalMenu;
 import io.github.timske6.simpleme.network.StorageClickPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import io.github.timske6.simpleme.storage.TerminalStorage;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
@@ -71,6 +73,49 @@ public class TerminalGuiClientTest implements FabricClientGameTest {
 			context.waitTicks(2);
 			ItemStack again = context.computeOnClient(mc -> TestItems.screen(mc).visibleEntry(0).copy());
 			check(ItemStack.isSameItemSameComponents(again, firstByName), "third click returns to name sorting");
+
+			// --- taking items does not shuffle the grid; an emptied type shows 0 until the terminal is reopened ---
+			TestItems.click(context, SORT_BUTTON_X, SORT_BUTTON_Y, InputConstants.MOUSE_BUTTON_LEFT);
+			context.waitTicks(2);
+			List<ItemStack> orderBefore = context.computeOnClient(mc -> {
+				List<ItemStack> list = new ArrayList<>();
+				for (int i = 0; i < TestItems.screen(mc).visibleEntryCount(); i++) {
+					list.add(TestItems.screen(mc).visibleEntry(i).copy());
+				}
+				return list;
+			});
+			int last = orderBefore.size() - 1;
+			long lastCount = context.computeOnClient(mc -> TestItems.screen(mc).visibleCount(last));
+			check(lastCount > 0 && lastCount <= 64, "the last entry (sorted by amount) fits into one stack, got " + lastCount);
+			// shift + left click (all of the smallest type) and a stack of the biggest type into the inventory
+			context.runOnClient(mc -> {
+				int id = mc.player.containerMenu.containerId;
+				ClientPlayNetworking.send(new StorageClickPayload(id, ItemVariant.of(orderBefore.get(last)), StorageClickPayload.QUICK_MOVE));
+				ClientPlayNetworking.send(new StorageClickPayload(id, ItemVariant.of(orderBefore.get(1)), StorageClickPayload.QUICK_MOVE));
+			});
+			context.waitTicks(5);
+			List<ItemStack> orderAfter = context.computeOnClient(mc -> {
+				List<ItemStack> list = new ArrayList<>();
+				for (int i = 0; i < TestItems.screen(mc).visibleEntryCount(); i++) {
+					list.add(TestItems.screen(mc).visibleEntry(i).copy());
+				}
+				return list;
+			});
+			check(orderAfter.size() == orderBefore.size(), "no entry disappears while the terminal is open");
+			for (int i = 0; i < orderBefore.size(); i++) {
+				check(ItemStack.isSameItemSameComponents(orderBefore.get(i), orderAfter.get(i)), "order unchanged at " + i);
+			}
+			check(context.computeOnClient(mc -> TestItems.screen(mc).visibleCount(last)) == 0, "the emptied type shows 0");
+			context.takeScreenshot("simpleme-gui-01b-emptied-type-shows-0");
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+			context.waitTicks(3);
+			open(context);
+			int reopened = context.computeOnClient(mc -> TestItems.screen(mc).visibleEntryCount());
+			check(reopened == orderBefore.size() - 1, "after reopening the emptied type is gone, got " + reopened + " of " + orderBefore.size());
+			// back to name sorting for the rest of the test
+			TestItems.click(context, SORT_BUTTON_X, SORT_BUTTON_Y, InputConstants.MOUSE_BUTTON_LEFT);
+			TestItems.click(context, SORT_BUTTON_X, SORT_BUTTON_Y, InputConstants.MOUSE_BUTTON_LEFT);
+			context.waitTicks(2);
 
 			// --- search is kept when the window is resized ---------------------------------------------
 			TestItems.click(context, 82 + 20, 4 + 6, InputConstants.MOUSE_BUTTON_LEFT);

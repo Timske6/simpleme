@@ -61,7 +61,14 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	private final CraftingRecipeBookComponent recipeBook;
 	private final Map<ItemVariant, Entry> entryCache = new HashMap<>();
+	/**
+	 * All entries in display order. It is only sorted when the terminal is opened (or the network
+	 * switched) and when the sort mode is changed, so taking items out does not shuffle the grid.
+	 * Item types that run out stay in the list with 0 until then; new ones are added at the end.
+	 */
+	private final List<Entry> order = new ArrayList<>();
 	private final List<Entry> visibleEntries = new ArrayList<>();
+	private int seenFullSyncs = -1;
 
 	private boolean widthTooNarrow;
 	private EditBox searchBox;
@@ -105,7 +112,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		this.searchBox.setResponder(value -> {
 			lastSearch = value;
 			this.scrollRow = 0;
-			this.refreshEntries();
+			this.refreshEntries(false, false);
 		});
 		this.addRenderableWidget(this.searchBox);
 
@@ -113,7 +120,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 			sortMode = sortMode.next();
 			button.setMessage(sortMode.label());
 			button.setTooltip(Tooltip.create(sortMode.tooltip()));
-			this.refreshEntries();
+			this.refreshEntries(true, false);
 		}).size(18, 14).tooltip(Tooltip.create(sortMode.tooltip())).build();
 		this.addRenderableWidget(this.sortButton);
 
@@ -144,7 +151,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		this.seenNetworkRevision = -1;
 
 		this.layoutWidgets();
-		this.refreshEntries();
+		this.refreshEntries(false, false);
 	}
 
 	private void layoutWidgets() {
@@ -196,16 +203,39 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		this.updateNetworkButton();
 		this.networkPanel.tick();
 		if (this.menu.getClientRevision() != this.seenRevision) {
-			this.refreshEntries();
+			boolean full = this.menu.getClientFullSyncs() != this.seenFullSyncs;
+			this.seenFullSyncs = this.menu.getClientFullSyncs();
+			this.refreshEntries(full, full);
 			// Makes the recipe book re-check which recipes can be crafted with the new storage contents.
 			this.minecraft.player.getInventory().setChanged();
 		}
 	}
 
-	private void refreshEntries() {
+	/**
+	 * @param resort sort the whole list again (otherwise the order stays, new item types go to the end)
+	 * @param dropEmpty forget item types that ran out (otherwise they are shown with 0)
+	 */
+	private void refreshEntries(boolean resort, boolean dropEmpty) {
 		this.seenRevision = this.menu.getClientRevision();
 		Object2LongMap<ItemVariant> items = this.menu.getClientItems();
-		this.entryCache.keySet().retainAll(items.keySet());
+		if (dropEmpty) {
+			this.entryCache.keySet().retainAll(items.keySet());
+			this.order.removeIf(entry -> !items.containsKey(entry.variant));
+		}
+		for (Entry entry : this.entryCache.values()) {
+			entry.count = items.getLong(entry.variant);
+		}
+		for (Object2LongMap.Entry<ItemVariant> item : items.object2LongEntrySet()) {
+			if (!this.entryCache.containsKey(item.getKey())) {
+				Entry entry = new Entry(item.getKey());
+				entry.count = item.getLongValue();
+				this.entryCache.put(item.getKey(), entry);
+				this.order.add(entry);
+			}
+		}
+		if (resort) {
+			this.order.sort(sortMode.comparator);
+		}
 
 		List<String> terms = new ArrayList<>();
 		for (String term : this.searchBox.getValue().toLowerCase(Locale.ROOT).split("\\s+")) {
@@ -215,14 +245,11 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		}
 
 		this.visibleEntries.clear();
-		for (Object2LongMap.Entry<ItemVariant> item : items.object2LongEntrySet()) {
-			Entry entry = this.entryCache.computeIfAbsent(item.getKey(), Entry::new);
-			entry.count = item.getLongValue();
+		for (Entry entry : this.order) {
 			if (entry.matches(terms)) {
 				this.visibleEntries.add(entry);
 			}
 		}
-		this.visibleEntries.sort(sortMode.comparator);
 		this.scrollRow = Mth.clamp(this.scrollRow, 0, this.maxScroll());
 	}
 
@@ -378,7 +405,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	}
 
 	private void extractCount(GuiGraphicsExtractor graphics, long count, int x, int y) {
-		if (count <= 1) {
+		if (count == 1) {
 			return;
 		}
 		String text = formatCount(count);
@@ -658,6 +685,11 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	public @Nullable ItemStack visibleEntry(int index) {
 		return index >= 0 && index < this.visibleEntries.size() ? this.visibleEntries.get(index).stack : null;
+	}
+
+	/** The count shown for an entry (0 for item types that ran out while the terminal is open). */
+	public long visibleCount(int index) {
+		return index >= 0 && index < this.visibleEntries.size() ? this.visibleEntries.get(index).count : -1;
 	}
 
 	public String searchText() {
