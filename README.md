@@ -24,6 +24,9 @@ Quellcode und Fehlermeldungen: https://github.com/Timske6/simpleme
   - 3×3-Werkbank im Terminal. Nach jedem Craft füllt sich das Raster automatisch aus dem Netzwerk nach.
   - **Rezeptbuch**: Rezept anklicken, dann werden die Zutaten direkt aus dem Netzwerk (und dem Inventar) eingelegt.
     Das Rezeptbuch zeigt auch Rezepte als craftbar an, deren Zutaten nur im Netzwerk liegen.
+  - **JEI** (optional): In jedem Werkbank-Rezept erscheint im Terminal und im Funk-Terminal ein `+`.
+    Klick legt einen Satz Zutaten aus dem Netzwerk (und dem Inventar) ins Raster, nochmal klicken legt einen weiteren dazu,
+    Shift + Klick so viele wie möglich. Fehlende Zutaten markiert JEI rot.
   - Rückstände wie leere Eimer (z. B. beim Kuchen) wandern automatisch zurück ins Netzwerk.
   - `×`-Knopf: legt das Werkbankraster zurück ins Netzwerk.
 - **Terminal abbauen ist ungefährlich**: Die Items bleiben im Netzwerk, das Terminal droppt als normales, stapelbares Item.
@@ -126,6 +129,7 @@ Redstone   Diamant    Redstone
 1. [Fabric Loader](https://fabricmc.net/use/) für Minecraft **26.3** installieren.
 2. [Fabric API](https://modrinth.com/mod/fabric-api) (Version für 26.3) in den `mods`-Ordner legen.
 3. `build/libs/simpleme-1.0.0+26.3.jar` in den `mods`-Ordner legen.
+4. Optional: [JEI](https://modrinth.com/mod/jei) für 26.3 (Fabric) – dann gibt es den `+`-Knopf in den Rezepten.
 
 Die Mod muss auf dem Server **und** auf dem Client installiert sein.
 

@@ -15,7 +15,8 @@
 	"environment": "*",
 	"entrypoints": {
 		"main": ["io.github.timske6.simpleme.SimpleME"],
-		"client": ["io.github.timske6.simpleme.client.SimpleMEClient"]
+		"client": ["io.github.timske6.simpleme.client.SimpleMEClient"],
+		"jei_mod_plugin": ["io.github.timske6.simpleme.client.jei.SimpleMEJeiPlugin"]
 	},
 	"mixins": ["simpleme.mixins.json"],
 	"depends": {
@@ -23,5 +24,8 @@
 		"minecraft": "~26.3",
 		"java": ">=25",
 		"fabric-api": ">=0.161.0"
+	},
+	"suggests": {
+		"jei": "*"
 	}
 }

@@ -806,6 +806,76 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 		return result;
 	}
 
+	// ------------------------------------------------------------------------------------------
+	// Recipe transfer from JEI: the "+" button sends the items each grid slot accepts
+	// ------------------------------------------------------------------------------------------
+
+	public void handleRecipeTransfer(ServerPlayer player, List<List<ItemVariant>> slots, boolean maxTransfer) {
+		if (this.host == null || player.isSpectator() || !this.stillValid(player)) {
+			return;
+		}
+		// Clicking "+" again on the recipe that is already in the grid adds one more set (like the recipe book).
+		int placed = this.setsInGrid(slots);
+
+		this.suppressCraftUpdates = true;
+		try {
+			this.returnGridToStorage(player);
+			TerminalStorage storage = this.storage();
+			ItemStack locked = this.host.lockedItem(player);
+			RecipeFill.Plan plan = RecipeFill.plan(slots, RecipeFill.available(
+				storage != null ? storage.view() : Object2LongMaps.emptyMap(), player.getInventory(), List.of(), locked
+			));
+			if (plan.sets() > 0) {
+				int sets = maxTransfer ? plan.sets() : Math.min(plan.sets(), placed + 1);
+				for (int i = 0; i < RecipeFill.GRID_SIZE; i++) {
+					ItemVariant variant = plan.variants()[i];
+					if (variant != null) {
+						this.craftSlots.setItem(i, this.takeForGrid(variant, sets, storage, player.getInventory(), locked));
+					}
+				}
+				player.getInventory().setChanged();
+			}
+		} finally {
+			this.suppressCraftUpdates = false;
+		}
+		this.refreshCraftingResult();
+		this.broadcastChanges();
+	}
+
+	/** How many sets of the recipe the grid holds right now (0 if it holds anything else). */
+	private int setsInGrid(List<List<ItemVariant>> slots) {
+		int sets = Integer.MAX_VALUE;
+		for (int i = 0; i < this.craftSlots.getContainerSize(); i++) {
+			ItemStack stack = this.craftSlots.getItem(i);
+			List<ItemVariant> alternatives = i < slots.size() ? slots.get(i) : List.of();
+			if (alternatives.isEmpty() != stack.isEmpty() || (!stack.isEmpty() && !RecipeFill.accepts(alternatives, stack))) {
+				return 0;
+			}
+			if (!stack.isEmpty()) {
+				sets = Math.min(sets, stack.getCount());
+			}
+		}
+		return sets == Integer.MAX_VALUE ? 0 : sets;
+	}
+
+	/** Takes up to {@code amount} items of exactly this variant: storage first, then the player inventory. */
+	private ItemStack takeForGrid(ItemVariant variant, int amount, @Nullable TerminalStorage storage, Inventory inventory, ItemStack locked) {
+		ItemStack result = storage != null ? storage.extractStack(variant, amount) : ItemStack.EMPTY;
+		for (int slot = 0; slot < Inventory.INVENTORY_SIZE && result.getCount() < amount; slot++) {
+			ItemStack stack = inventory.getItem(slot);
+			if (stack.isEmpty() || stack == locked || !variant.matches(stack)) {
+				continue;
+			}
+			ItemStack taken = inventory.removeItem(slot, amount - result.getCount());
+			if (result.isEmpty()) {
+				result = taken;
+			} else {
+				result.grow(taken.getCount());
+			}
+		}
+		return result;
+	}
+
 	@Override
 	public Slot getResultSlot() {
 		return this.slots.get(RESULT_SLOT);

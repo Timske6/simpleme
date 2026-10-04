@@ -10,6 +10,7 @@ import io.github.timske6.simpleme.menu.TerminalMenu;
 import io.github.timske6.simpleme.menu.TransferChestMenu;
 import io.github.timske6.simpleme.network.NetworkActionPayload;
 import io.github.timske6.simpleme.network.NetworkActions;
+import io.github.timske6.simpleme.network.RecipeTransferPayload;
 import io.github.timske6.simpleme.network.StorageClickPayload;
 import io.github.timske6.simpleme.storage.Networks;
 import io.github.timske6.simpleme.storage.StorageData;
@@ -19,6 +20,7 @@ import io.github.timske6.simpleme.storage.TerminalStorage;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -46,6 +48,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.WrittenBookContent;
@@ -612,6 +615,89 @@ public class TerminalGameTests {
 		placeRecipe(helper, player, menu, "iron_nugget", false);
 		helper.assertTrue(menu.getSlot(TerminalMenu.RESULT_SLOT).getItem().is(Items.IRON_NUGGET), "ingredient taken from the player inventory");
 		finish(helper, player);
+	}
+
+	@GameTest
+	public void jeiTransferFillsGridFromStorage(GameTestHelper helper) {
+		TerminalStorage storage = placeTerminal(helper).getStorage();
+		storage.insert(ItemVariant.of(Items.BIRCH_PLANKS), 500);
+		storage.insert(ItemVariant.of(Items.OAK_PLANKS), 3);
+		ServerPlayer player = mockPlayer(helper, GameType.SURVIVAL);
+		TerminalMenu menu = openTerminal(helper, player);
+		List<ItemVariant> planks = variants(Items.OAK_PLANKS, Items.SPRUCE_PLANKS, Items.BIRCH_PLANKS);
+		List<List<ItemVariant>> stick = grid(List.of(), planks, List.of(), List.of(), planks);
+		RegistryFriendlyByteBuf buf = new RegistryFriendlyByteBuf(Unpooled.buffer(), helper.getLevel().registryAccess());
+		RecipeTransferPayload.CODEC.encode(buf, new RecipeTransferPayload(menu.containerId, stick, true));
+		helper.assertTrue(RecipeTransferPayload.CODEC.decode(buf).slots().equals(stick), "transfer packet round trip");
+
+		menu.handleRecipeTransfer(player, stick, false);
+		helper.assertTrue(menu.getSlot(TerminalMenu.RESULT_SLOT).getItem().is(Items.STICK), "stick recipe filled from storage");
+		helper.assertTrue(menu.getSlot(TerminalMenu.GRID_START + 1).getItem().is(Items.BIRCH_PLANKS), "the plank kind with the most items is used");
+		menu.handleRecipeTransfer(player, stick, false);
+		helper.assertTrue(maxGridCount(menu) == 2, "pressing + again adds one more set, got " + maxGridCount(menu));
+		menu.handleRecipeTransfer(player, stick, true);
+		helper.assertTrue(maxGridCount(menu) == 64, "shift + fills a full stack per slot, got " + maxGridCount(menu));
+		helper.assertTrue(storage.getAmount(ItemVariant.of(Items.BIRCH_PLANKS)) == 500 - 128, "planks taken from storage");
+
+		// another recipe replaces the grid, the old contents go back
+		menu.handleRecipeTransfer(player, grid(variants(Items.BIRCH_PLANKS)), false);
+		helper.assertTrue(menu.getSlot(TerminalMenu.RESULT_SLOT).getItem().is(Items.BIRCH_BUTTON), "button recipe filled");
+		helper.assertTrue(storage.getAmount(ItemVariant.of(Items.BIRCH_PLANKS)) == 499, "previous grid returned to storage");
+		finish(helper, player);
+	}
+
+	@GameTest
+	public void jeiTransferSharesItemsBetweenSlots(GameTestHelper helper) {
+		TerminalStorage storage = placeTerminal(helper).getStorage();
+		storage.insert(ItemVariant.of(Items.OAK_PLANKS), 3);
+		storage.insert(ItemVariant.of(Items.BIRCH_PLANKS), 2);
+		ServerPlayer player = mockPlayer(helper, GameType.SURVIVAL);
+		player.getInventory().setItem(5, new ItemStack(Items.SPRUCE_PLANKS, 3));
+		TerminalMenu menu = openTerminal(helper, player);
+		List<ItemVariant> planks = variants(Items.OAK_PLANKS, Items.SPRUCE_PLANKS, Items.BIRCH_PLANKS);
+		List<List<ItemVariant>> chest = grid(planks, planks, planks, planks, List.of(), planks, planks, planks, planks);
+
+		menu.handleRecipeTransfer(player, chest, true);
+		helper.assertTrue(menu.getSlot(TerminalMenu.RESULT_SLOT).getItem().is(Items.CHEST), "chest from three kinds of planks");
+		helper.assertTrue(maxGridCount(menu) == 1, "only one set possible");
+		helper.assertTrue(storage.isEmpty() && player.getInventory().countItem(Items.SPRUCE_PLANKS) == 0, "storage and inventory planks used");
+		finish(helper, player);
+	}
+
+	@GameTest
+	public void jeiTransferRespectsStackSizeAndSpecialItems(GameTestHelper helper) {
+		TerminalStorage storage = placeTerminal(helper).getStorage();
+		storage.insert(ItemVariant.of(Items.ENDER_PEARL), 100);
+		storage.insert(ItemVariant.of(Items.BLAZE_POWDER), 100);
+		ItemStack named = new ItemStack(Items.IRON_INGOT);
+		named.set(DataComponents.CUSTOM_NAME, Component.literal("Keep me"));
+		storage.insert(ItemVariant.of(named), 5);
+		ServerPlayer player = mockPlayer(helper, GameType.SURVIVAL);
+		TerminalMenu menu = openTerminal(helper, player);
+
+		menu.handleRecipeTransfer(player, grid(variants(Items.ENDER_PEARL), variants(Items.BLAZE_POWDER)), true);
+		helper.assertTrue(menu.getSlot(TerminalMenu.RESULT_SLOT).getItem().is(Items.ENDER_EYE), "eye of ender recipe filled");
+		helper.assertTrue(maxGridCount(menu) == 16, "limited to the ender pearl stack size, got " + maxGridCount(menu));
+
+		menu.handleRecipeTransfer(player, grid(variants(Items.IRON_INGOT)), false);
+		helper.assertTrue(menu.getSlot(TerminalMenu.RESULT_SLOT).getItem().isEmpty(), "named ingots must not be used for a plain ingredient");
+		helper.assertTrue(storage.getAmount(ItemVariant.of(named)) == 5, "named ingots untouched");
+		helper.assertTrue(storage.getAmount(ItemVariant.of(Items.ENDER_PEARL)) == 100, "old grid returned");
+
+		// ...unless the recipe asks for exactly that item
+		menu.handleRecipeTransfer(player, grid(List.of(ItemVariant.of(named))), false);
+		helper.assertTrue(menu.getSlot(TerminalMenu.GRID_START).getItem().is(Items.IRON_INGOT), "exact item taken");
+		helper.assertTrue(storage.getAmount(ItemVariant.of(named)) == 4, "one named ingot in the grid");
+		finish(helper, player);
+	}
+
+	private static List<ItemVariant> variants(Item... items) {
+		return Arrays.stream(items).map(ItemVariant::of).toList();
+	}
+
+	@SafeVarargs
+	private static List<List<ItemVariant>> grid(List<ItemVariant>... slots) {
+		return List.of(slots);
 	}
 
 	@GameTest
