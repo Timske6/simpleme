@@ -29,7 +29,7 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import org.jspecify.annotations.Nullable;
 
-/** JEI's "+" button in a terminal: fills the crafting grid from the storage, marks missing items. */
+/** JEI in a terminal: R / U on storage items, and the "+" button fills the crafting grid from the storage. */
 @SuppressWarnings({"UnstableApiUsage", "removal"})
 public class JeiTransferClientTest implements FabricClientGameTest {
 	private static final BlockPos TERMINAL = new BlockPos(0, -60, -3);
@@ -78,6 +78,23 @@ public class JeiTransferClientTest implements FabricClientGameTest {
 			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 			context.waitForScreen(TerminalScreen.class);
 
+			// R / U over an item of the storage grid (no real slot) open JEI for it
+			context.waitTicks(2);
+			TestItems.moveTo(context, TerminalMenu.GRID_X + 8, TerminalMenu.GRID_Y + 8);
+			context.waitTicks(2);
+			context.getInput().pressKey(InputConstants.KEY_R);
+			context.waitFor(mc -> isJeiRecipeScreen(mc), 40);
+			context.takeScreenshot("simpleme-jei-00a-recipes-of-storage-item");
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+			context.waitForScreen(TerminalScreen.class);
+			TestItems.moveTo(context, TerminalMenu.GRID_X + 8, TerminalMenu.GRID_Y + 8);
+			context.waitTicks(2);
+			context.getInput().pressKey(InputConstants.KEY_U);
+			context.waitFor(mc -> isJeiRecipeScreen(mc), 40);
+			context.takeScreenshot("simpleme-jei-00b-uses-of-storage-item");
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+			context.waitForScreen(TerminalScreen.class);
+
 			// "+" (one set), then shift + "+" (as many as possible)
 			context.runOnClient(mc -> transfer(mc, "stick", false, true));
 			context.waitFor(mc -> menu(mc).getSlot(TerminalMenu.RESULT_SLOT).getItem().is(Items.STICK));
@@ -94,6 +111,10 @@ public class JeiTransferClientTest implements FabricClientGameTest {
 			context.waitTicks(3);
 			server.runOnServer(s -> check(storage[0].getAmount(ItemVariant.of(Items.BIRCH_PLANKS)) == 100, "closing returns the grid"));
 		}
+	}
+
+	private static boolean isJeiRecipeScreen(Minecraft mc) {
+		return mc.gui.screen() != null && mc.gui.screen().getClass().getName().startsWith("mezz.jei.");
 	}
 
 	private static TerminalMenu menu(Minecraft mc) {

@@ -27,6 +27,7 @@ Quellcode und Fehlermeldungen: https://github.com/Timske6/simpleme
   - **JEI** (optional): In jedem Werkbank-Rezept erscheint im Terminal und im Funk-Terminal ein `+`.
     Klick legt einen Satz Zutaten aus dem Netzwerk (und dem Inventar) ins Raster, nochmal klicken legt einen weiteren dazu,
     Shift + Klick so viele wie möglich. Fehlende Zutaten markiert JEI rot.
+    `R` / `U` über einem Item im Terminal zeigen dessen Rezepte bzw. Verwendungen.
   - Rückstände wie leere Eimer (z. B. beim Kuchen) wandern automatisch zurück ins Netzwerk.
   - `×`-Knopf: legt das Werkbankraster zurück ins Netzwerk.
 - **Terminal abbauen ist ungefährlich**: Die Items bleiben im Netzwerk, das Terminal droppt als normales, stapelbares Item.

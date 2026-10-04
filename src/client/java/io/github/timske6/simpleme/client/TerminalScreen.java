@@ -694,6 +694,20 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		return index >= 0 && index < this.visibleEntries.size() ? this.visibleEntries.get(index).count : -1;
 	}
 
+	/** The item shown in the storage grid at the mouse, with its cell in screen coordinates (for recipe viewers like JEI). */
+	public @Nullable StorageCell storageCellAt(double mouseX, double mouseY) {
+		Entry entry = this.entryAt(mouseX, mouseY);
+		if (entry == null) {
+			return null;
+		}
+		int column = (int) ((mouseX - this.leftPos - (TerminalMenu.GRID_X - 1)) / 18);
+		int row = (int) ((mouseY - this.topPos - (TerminalMenu.GRID_Y - 1)) / 18);
+		return new StorageCell(entry.stack, this.leftPos + TerminalMenu.GRID_X + column * 18, this.topPos + TerminalMenu.GRID_Y + row * 18);
+	}
+
+	public record StorageCell(ItemStack stack, int x, int y) {
+	}
+
 	public String searchText() {
 		return this.searchBox.getValue();
 	}
