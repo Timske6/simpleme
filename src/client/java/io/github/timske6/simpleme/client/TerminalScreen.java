@@ -1,5 +1,6 @@
 package io.github.timske6.simpleme.client;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import io.github.timske6.simpleme.menu.TerminalMenu;
 import io.github.timske6.simpleme.network.StorageClickPayload;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
@@ -67,6 +68,11 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	private Button sortButton;
 	private Button clearButton;
 	private ImageButton recipeButton;
+	private Button networkButton;
+	private @Nullable NetworkPanel networkPanel;
+	private int seenNetworkRevision = -1;
+	/** The network list opens by itself once, if the terminal is not connected to a network. */
+	private boolean networkPanelShown;
 
 	private int seenRevision = -1;
 	private int scrollRow;
@@ -126,6 +132,17 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		this.addRenderableWidget(this.recipeButton);
 		this.addWidget(this.recipeBook);
 
+		this.networkButton = Button.builder(Component.empty(), button -> this.networkPanel.open())
+			.size(73, 13)
+			.tooltip(Tooltip.create(Component.translatable("gui.simpleme.network.choose")))
+			.build();
+		this.addRenderableWidget(this.networkButton);
+		if (this.networkPanel == null) {
+			this.networkPanel = new NetworkPanel(this.minecraft, this.menu.containerId, this.menu.networkState());
+		}
+		this.networkPanel.layout(this.width, this.height);
+		this.seenNetworkRevision = -1;
+
 		this.layoutWidgets();
 		this.refreshEntries();
 	}
@@ -139,6 +156,33 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		this.clearButton.setY(this.topPos + this.menu.craftingY + 19);
 		this.recipeButton.setX(this.leftPos + 152);
 		this.recipeButton.setY(this.topPos + this.menu.craftingY + 17);
+		this.networkButton.setX(this.leftPos + 6);
+		this.networkButton.setY(this.topPos + 3);
+	}
+
+	private boolean panelOpen() {
+		return this.networkPanel != null && this.networkPanel.isOpen();
+	}
+
+	private void updateNetworkButton() {
+		var state = this.menu.networkState();
+		if (state.revision() == this.seenNetworkRevision) {
+			return;
+		}
+		this.seenNetworkRevision = state.revision();
+		Component label = state.current() != null
+			? Component.literal(state.currentName())
+			: Component.translatable("gui.simpleme.network.none_short").withStyle(ChatFormatting.RED);
+		String text = label.getString();
+		int max = this.networkButton.getWidth() - 6;
+		if (this.font.width(text) > max) {
+			label = Component.literal(this.font.plainSubstrByWidth(text, max - this.font.width("...")) + "...").withStyle(label.getStyle());
+		}
+		this.networkButton.setMessage(label);
+		if (state.received() && state.current() == null && !this.networkPanelShown) {
+			this.networkPanelShown = true;
+			this.networkPanel.open();
+		}
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -149,6 +193,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	protected void containerTick() {
 		super.containerTick();
 		this.recipeBook.tick();
+		this.updateNetworkButton();
+		this.networkPanel.tick();
 		if (this.menu.getClientRevision() != this.seenRevision) {
 			this.refreshEntries();
 			// Makes the recipe book re-check which recipes can be crafted with the new storage contents.
@@ -192,13 +238,13 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	private boolean isOverGrid(double mouseX, double mouseY) {
 		double x = mouseX - this.leftPos - (TerminalMenu.GRID_X - 1);
 		double y = mouseY - this.topPos - (TerminalMenu.GRID_Y - 1);
-		return !this.interactionBlocked() && x >= 0 && y >= 0 && x < TerminalMenu.COLUMNS * 18 && y < this.menu.rows * 18;
+		return !this.interactionBlocked() && !this.panelOpen() && x >= 0 && y >= 0 && x < TerminalMenu.COLUMNS * 18 && y < this.menu.rows * 18;
 	}
 
 	private boolean isOverScrollbar(double mouseX, double mouseY) {
 		double x = mouseX - this.leftPos - SCROLLBAR_X;
 		double y = mouseY - this.topPos - (TerminalMenu.GRID_Y - 1);
-		return !this.interactionBlocked() && x >= 0 && y >= 0 && x < 14 && y < this.menu.rows * 18;
+		return !this.interactionBlocked() && !this.panelOpen() && x >= 0 && y >= 0 && x < 14 && y < this.menu.rows * 18;
 	}
 
 	private @Nullable Entry entryAt(double mouseX, double mouseY) {
@@ -224,14 +270,24 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		boolean panel = this.panelOpen();
+		// with the network panel open, nothing below it reacts to the mouse
+		int x = panel ? -1000 : mouseX;
+		int y = panel ? -1000 : mouseY;
 		if (this.interactionBlocked()) {
-			this.extractBackground(graphics, mouseX, mouseY, a);
+			this.extractBackground(graphics, x, y, a);
 		} else {
-			super.extractContents(graphics, mouseX, mouseY, a);
+			super.extractContents(graphics, x, y, a);
 		}
 		graphics.nextStratum();
-		this.recipeBook.extractRenderState(graphics, mouseX, mouseY, a);
+		this.recipeBook.extractRenderState(graphics, x, y, a);
 		graphics.nextStratum();
+		if (panel) {
+			this.networkPanel.extractRenderState(graphics, mouseX, mouseY, a);
+			graphics.nextStratum();
+			this.extractCarriedItem(graphics, mouseX, mouseY);
+			return;
+		}
 		this.extractCarriedItem(graphics, mouseX, mouseY);
 		this.extractTooltip(graphics, mouseX, mouseY);
 		this.recipeBook.extractTooltip(graphics, mouseX, mouseY, this.hoveredSlot);
@@ -280,7 +336,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	@Override
 	protected void extractLabels(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-		graphics.text(this.font, this.title, this.titleLabelX, this.titleLabelY, 0xFF404040, false);
+		// the title row shows the network button instead of the title
 		graphics.text(this.font, this.playerInventoryTitle, this.inventoryLabelX, this.inventoryLabelY, 0xFF404040, false);
 	}
 
@@ -367,7 +423,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		}
 	}
 
-	private static void drawPanel(GuiGraphicsExtractor graphics, int x, int y, int width, int height) {
+	static void drawPanel(GuiGraphicsExtractor graphics, int x, int y, int width, int height) {
 		int right = x + width;
 		int bottom = y + height;
 		graphics.fill(x + 1, y + 1, right - 1, bottom - 1, COLOR_PANEL);
@@ -405,6 +461,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		if (this.panelOpen()) {
+			return this.networkPanel.mouseClicked(event, doubleClick);
+		}
 		if (this.recipeBook.mouseClicked(event, doubleClick)) {
 			this.setFocused(this.recipeBook);
 			return true;
@@ -416,7 +475,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		double mouseX = event.x();
 		double mouseY = event.y();
 		if (this.searchBox.isMouseOver(mouseX, mouseY)) {
-			if (event.button() == 1) {
+			if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT) {
 				this.searchBox.setValue("");
 			}
 		} else if (this.searchBox.isFocused()) {
@@ -443,9 +502,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		int action;
 		if (!carried.isEmpty()) {
 			variant = ItemVariant.of(carried);
-			if (button == 0) {
+			if (button == InputConstants.MOUSE_BUTTON_LEFT) {
 				action = StorageClickPayload.INSERT_ALL;
-			} else if (button == 1) {
+			} else if (button == InputConstants.MOUSE_BUTTON_RIGHT) {
 				action = StorageClickPayload.INSERT_ONE;
 			} else {
 				return;
@@ -461,9 +520,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 					return;
 				}
 				action = StorageClickPayload.CLONE;
-			} else if (button == 0) {
+			} else if (button == InputConstants.MOUSE_BUTTON_LEFT) {
 				action = event.hasShiftDown() ? StorageClickPayload.QUICK_MOVE : StorageClickPayload.TAKE_STACK;
-			} else if (button == 1) {
+			} else if (button == InputConstants.MOUSE_BUTTON_RIGHT) {
 				action = event.hasShiftDown() ? StorageClickPayload.TAKE_ONE : StorageClickPayload.TAKE_HALF;
 			} else {
 				return;
@@ -474,6 +533,10 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
+		if (this.panelOpen()) {
+			this.gridClickConsumed = false;
+			return this.networkPanel.mouseReleased(event);
+		}
 		if (this.draggingScrollbar) {
 			this.draggingScrollbar = false;
 			return true;
@@ -487,6 +550,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	@Override
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+		if (this.panelOpen()) {
+			return this.networkPanel.mouseDragged(event, dx, dy);
+		}
 		if (this.draggingScrollbar) {
 			this.scrollTo(event.y());
 			return true;
@@ -499,6 +565,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		if (this.panelOpen()) {
+			return this.networkPanel.mouseScrolled(scrollY);
+		}
 		if (this.isOverGrid(mouseX, mouseY) || this.isOverScrollbar(mouseX, mouseY)) {
 			// Keep fractions so touchpads scroll smoothly and the mouse wheel sensitivity option is respected.
 			this.scrollRemainder += scrollY;
@@ -512,6 +581,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
+		if (this.panelOpen()) {
+			return this.networkPanel.keyPressed(event);
+		}
 		if (this.searchBox.isFocused()) {
 			if (event.isEscape()) {
 				return super.keyPressed(event);
@@ -528,6 +600,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	@Override
 	public boolean charTyped(CharacterEvent event) {
+		if (this.panelOpen()) {
+			return this.networkPanel.charTyped(event);
+		}
 		if (this.searchBox.isFocused()) {
 			return this.searchBox.charTyped(event);
 		}
@@ -536,7 +611,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	@Override
 	protected boolean isHovering(int left, int top, int w, int h, double xm, double ym) {
-		return !this.interactionBlocked() && super.isHovering(left, top, w, h, xm, ym);
+		return !this.interactionBlocked() && !this.panelOpen() && super.isHovering(left, top, w, h, xm, ym);
 	}
 
 	@Override
@@ -587,6 +662,10 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	public String searchText() {
 		return this.searchBox.getValue();
+	}
+
+	public boolean isNetworkPanelOpen() {
+		return this.panelOpen();
 	}
 
 	private static final class Entry {

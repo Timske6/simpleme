@@ -2,22 +2,13 @@
   "type": "minecraft:block",
   "pools": [
     {
-      "rolls": 1.0,
       "entries": [
         {
           "type": "minecraft:item",
-          "name": "simpleme:terminal",
-          "functions": [
-            {
-              "function": "minecraft:copy_components",
-              "source": "block_entity",
-              "include": [
-                "simpleme:storage"
-              ]
-            }
-          ]
+          "name": "simpleme:terminal"
         }
-      ]
+      ],
+      "rolls": 1
     }
   ],
   "random_sequence": "simpleme:blocks/terminal"

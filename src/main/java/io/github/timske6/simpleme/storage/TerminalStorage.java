@@ -18,8 +18,8 @@ import net.minecraft.world.item.ItemStack;
  * The actual item storage of a terminal: unlimited item types, each with a (long) count.
  */
 public class TerminalStorage {
-	/** Upper bound per item type, far below Long.MAX_VALUE so adding to a count never overflows. */
-	public static final long MAX_PER_TYPE = Long.MAX_VALUE / 16;
+	/** Upper bound per item type (about 9.2 quintillion). All additions are checked against it, so counts never overflow. */
+	public static final long MAX_PER_TYPE = Long.MAX_VALUE;
 
 	private final Object2LongLinkedOpenHashMap<ItemVariant> items = new Object2LongLinkedOpenHashMap<>();
 	private final Runnable changeListener;
@@ -135,7 +135,8 @@ public class TerminalStorage {
 		items.clear();
 		for (StoredItems.Entry entry : entries) {
 			if (!entry.variant().isBlank() && entry.count() > 0) {
-				items.put(entry.variant(), Math.min(MAX_PER_TYPE, items.getLong(entry.variant()) + entry.count()));
+				long current = items.getLong(entry.variant());
+				items.put(entry.variant(), entry.count() > MAX_PER_TYPE - current ? MAX_PER_TYPE : current + entry.count());
 			}
 		}
 		version++;

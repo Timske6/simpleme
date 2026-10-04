@@ -1,0 +1,12 @@
+{
+  "variants": {
+    "enabled=true,facing=north": { "model": "simpleme:block/transfer_chest" },
+    "enabled=true,facing=east": { "model": "simpleme:block/transfer_chest", "y": 90 },
+    "enabled=true,facing=south": { "model": "simpleme:block/transfer_chest", "y": 180 },
+    "enabled=true,facing=west": { "model": "simpleme:block/transfer_chest", "y": 270 },
+    "enabled=false,facing=north": { "model": "simpleme:block/transfer_chest_off" },
+    "enabled=false,facing=east": { "model": "simpleme:block/transfer_chest_off", "y": 90 },
+    "enabled=false,facing=south": { "model": "simpleme:block/transfer_chest_off", "y": 180 },
+    "enabled=false,facing=west": { "model": "simpleme:block/transfer_chest_off", "y": 270 }
+  }
+}

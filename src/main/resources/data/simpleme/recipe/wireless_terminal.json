@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "E": "minecraft:ender_eye",
+    "G": "minecraft:glass_pane",
+    "R": "minecraft:redstone",
+    "D": "minecraft:diamond"
+  },
+  "pattern": [
+    " E ",
+    "IGI",
+    "RDR"
+  ],
+  "result": {
+    "id": "simpleme:wireless_terminal"
+  }
+}

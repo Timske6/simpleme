@@ -2,7 +2,7 @@ plugins {
 	id 'net.fabricmc.fabric-loom' version "${loom_version}"
 }
 
-// e.g. simpleme-1.0.0+26.2.jar, so players see which Minecraft version a file is for
+// e.g. simpleme-1.0.0+26.3.jar, so players see which Minecraft version a file is for
 version = "${project.mod_version}+${project.minecraft_version}"
 
 base {

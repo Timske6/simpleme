@@ -1,9 +1,10 @@
 package io.github.timske6.simpleme.menu;
 
 import io.github.timske6.simpleme.ModRegistry;
-import io.github.timske6.simpleme.block.TerminalBlockEntity;
+import io.github.timske6.simpleme.network.NetworkActions;
 import io.github.timske6.simpleme.network.StorageClickPayload;
 import io.github.timske6.simpleme.network.StorageSyncPayload;
+import io.github.timske6.simpleme.storage.Networks;
 import io.github.timske6.simpleme.storage.StoredItems;
 import io.github.timske6.simpleme.storage.TerminalStorage;
 import it.unimi.dsi.fastutil.objects.Object2LongLinkedOpenHashMap;
@@ -13,7 +14,9 @@ import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.IntSupplier;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
@@ -25,13 +28,14 @@ import net.minecraft.recipebook.PlaceRecipeHelper;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.util.Prediction;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.player.StackedItemContents;
 import net.minecraft.world.inventory.AbstractCraftingMenu;
 import net.minecraft.world.inventory.ContainerInput;
-import net.minecraft.world.inventory.ContainerLevelAccess;
+import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.RecipeBookType;
 import net.minecraft.world.inventory.ResultSlot;
 import net.minecraft.world.inventory.Slot;
@@ -44,10 +48,10 @@ import net.minecraft.world.item.crafting.RecipeType;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Menu of the ME terminal: a virtual item grid (synced via custom packets), a 3x3 crafting
- * grid that refills itself from the storage and the player inventory.
+ * Menu of the ME terminal (placed or wireless): a virtual item grid (synced via custom packets),
+ * a 3x3 crafting grid that refills itself from the storage and the player inventory.
  */
-public class TerminalMenu extends AbstractCraftingMenu {
+public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 	public static final int RESULT_SLOT = 0;
 	public static final int GRID_START = 1;
 	public static final int GRID_END = 10;
@@ -80,8 +84,7 @@ public class TerminalMenu extends AbstractCraftingMenu {
 	public final int imageHeight;
 
 	private final Player player;
-	private final ContainerLevelAccess access;
-	private final @Nullable TerminalBlockEntity terminal;
+	private final @Nullable TerminalHost host;
 
 	// server side sync state
 	private final Object2LongOpenHashMap<ItemVariant> lastSent = new Object2LongOpenHashMap<>();
@@ -91,24 +94,30 @@ public class TerminalMenu extends AbstractCraftingMenu {
 	/** Crafts allowed during the click that is being handled (shift-click / ctrl+Q would otherwise empty the storage). */
 	private int craftLimit = Integer.MAX_VALUE;
 	private int craftsThisClick;
+	/** The storage the client view belongs to; a different one (network switched or deleted) means a full resync. */
+	private @Nullable TerminalStorage syncedStorage;
+	private boolean networkSent;
+	private @Nullable UUID sentNetworkId;
+	private boolean sentNetworkAvailable;
 
 	// client side mirror of the storage
 	private final Object2LongLinkedOpenHashMap<ItemVariant> clientItems = new Object2LongLinkedOpenHashMap<>();
 	private int clientRevision;
+	private final NetworkClientState networkState = new NetworkClientState();
 
-	/** Client constructor (called through the menu type with the block position). */
+	/** Client constructor of the placed terminal (called through the menu type with the block position). */
 	public TerminalMenu(int containerId, Inventory inventory, BlockPos pos) {
-		this(containerId, inventory, (TerminalBlockEntity) null);
+		this(ModRegistry.TERMINAL_MENU, containerId, inventory, null);
 	}
 
-	/** Server constructor. */
-	public TerminalMenu(int containerId, Inventory inventory, @Nullable TerminalBlockEntity terminal) {
-		super(ModRegistry.TERMINAL_MENU, containerId, 3, 3);
+	/**
+	 * @param type {@link ModRegistry#TERMINAL_MENU} or {@link ModRegistry#WIRELESS_TERMINAL_MENU}
+	 * @param host the storage to work on (server), {@code null} on the client
+	 */
+	public TerminalMenu(MenuType<?> type, int containerId, Inventory inventory, @Nullable TerminalHost host) {
+		super(type, containerId, 3, 3);
 		this.player = inventory.player;
-		this.terminal = terminal;
-		this.access = terminal != null && terminal.getLevel() != null
-			? ContainerLevelAccess.create(terminal.getLevel(), terminal.getBlockPos())
-			: ContainerLevelAccess.NULL;
+		this.host = host;
 
 		this.rows = inventory.player.level().isClientSide() ? Mth.clamp(clientRows.getAsInt(), MIN_ROWS, MAX_ROWS) : DEFAULT_ROWS;
 		this.craftingY = GRID_Y + this.rows * 18 + 8;
@@ -122,7 +131,52 @@ public class TerminalMenu extends AbstractCraftingMenu {
 	}
 
 	public boolean isServerSide() {
-		return this.terminal != null;
+		return this.host != null;
+	}
+
+	/**
+	 * The storage of the connected network, or {@code null} if there is none, it was deleted or the
+	 * player has no access (any more). Server side only.
+	 */
+	private @Nullable TerminalStorage storage() {
+		if (this.host == null || !(this.player.level() instanceof ServerLevel level)) {
+			return null;
+		}
+		UUID id = this.host.getNetworkId();
+		Networks.Network network = Networks.get(level.getServer()).find(id);
+		return network != null && network.canAccess(this.player) ? Networks.storage(level.getServer(), id) : null;
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Network
+	// ------------------------------------------------------------------------------------------
+
+	@Override
+	public @Nullable UUID networkId() {
+		return this.host != null ? this.host.getNetworkId() : null;
+	}
+
+	@Override
+	public void connectNetwork(ServerPlayer player, @Nullable UUID id) {
+		if (this.host == null || Objects.equals(id, this.host.getNetworkId())) {
+			return;
+		}
+		// the crafting grid goes back to the network it came from
+		this.suppressCraftUpdates = true;
+		try {
+			this.returnGridToStorage(player);
+		} finally {
+			this.suppressCraftUpdates = false;
+		}
+		this.host.setNetworkId(id);
+		this.refreshCraftingResult();
+		this.lastSyncTick = -1;
+		this.broadcastChanges();
+	}
+
+	@Override
+	public NetworkClientState networkState() {
+		return this.networkState;
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -131,35 +185,32 @@ public class TerminalMenu extends AbstractCraftingMenu {
 
 	@Override
 	public boolean stillValid(Player player) {
-		if (this.terminal != null && this.terminal.isRemoved()) {
-			return false;
-		}
-		return stillValid(this.access, player, ModRegistry.TERMINAL_BLOCK);
+		return this.host == null || this.host.stillValid(player);
 	}
 
 	@Override
 	public void removed(Player player) {
 		super.removed(player);
-		if (this.terminal != null) {
+		if (this.host != null) {
 			this.returnGridToStorage(player);
 		}
 	}
 
 	private void returnGridToStorage(Player player) {
-		boolean storageAvailable = this.terminal != null && !this.terminal.isRemoved();
+		TerminalStorage storage = this.storage();
 		for (int i = 0; i < this.craftSlots.getContainerSize(); i++) {
 			ItemStack stack = this.craftSlots.removeItemNoUpdate(i);
 			if (stack.isEmpty()) {
 				continue;
 			}
-			if (storageAvailable) {
-				this.terminal.getStorage().insertStack(stack);
+			if (storage != null) {
+				storage.insertStack(stack);
 			}
 			if (!stack.isEmpty()) {
 				if (player.isRemoved() || (player instanceof ServerPlayer serverPlayer && serverPlayer.hasDisconnected())) {
-					player.drop(stack, false);
+					player.drop(stack, false, Prediction.SERVER_ONLY);
 				} else {
-					player.getInventory().placeItemBackInInventory(stack);
+					player.getInventory().placeItemBackInInventory(stack, Prediction.SERVER_ONLY);
 				}
 			}
 		}
@@ -168,7 +219,7 @@ public class TerminalMenu extends AbstractCraftingMenu {
 	@Override
 	public boolean clickMenuButton(Player player, int buttonId) {
 		if (buttonId == BUTTON_CLEAR_GRID) {
-			if (this.terminal != null) {
+			if (this.host != null) {
 				this.suppressCraftUpdates = true;
 				try {
 					this.returnGridToStorage(player);
@@ -193,11 +244,27 @@ public class TerminalMenu extends AbstractCraftingMenu {
 	}
 
 	private void syncStorage() {
-		if (this.terminal == null || !(this.player instanceof ServerPlayer serverPlayer)) {
+		if (this.host == null || !(this.player instanceof ServerPlayer serverPlayer)) {
 			return;
 		}
-		TerminalStorage storage = this.terminal.getStorage();
-		if (storage.getVersion() == this.lastSentVersion) {
+		TerminalStorage storage = this.storage();
+		UUID networkId = this.host.getNetworkId();
+		if (!this.networkSent || !Objects.equals(networkId, this.sentNetworkId) || (storage != null) != this.sentNetworkAvailable) {
+			this.networkSent = true;
+			this.sentNetworkId = networkId;
+			this.sentNetworkAvailable = storage != null;
+			NetworkActions.sendList(serverPlayer, this.containerId, networkId);
+		}
+		if (storage != this.syncedStorage) {
+			this.syncedStorage = storage;
+			this.lastSentVersion = Long.MIN_VALUE;
+			if (storage == null) {
+				this.lastSent.clear();
+				ServerPlayNetworking.send(serverPlayer, new StorageSyncPayload(this.containerId, true, List.of()));
+				return;
+			}
+		}
+		if (storage == null || storage.getVersion() == this.lastSentVersion) {
 			return;
 		}
 		// At most once per tick, no matter how many clicks arrive; the rest is picked up next tick.
@@ -272,10 +339,10 @@ public class TerminalMenu extends AbstractCraftingMenu {
 	// ------------------------------------------------------------------------------------------
 
 	public void handleStorageClick(ServerPlayer player, ItemVariant variant, int action) {
-		if (this.terminal == null || player.isSpectator() || !this.stillValid(player)) {
+		TerminalStorage storage = this.storage();
+		if (storage == null || player.isSpectator() || !this.stillValid(player)) {
 			return;
 		}
-		TerminalStorage storage = this.terminal.getStorage();
 		ItemStack carried = this.getCarried();
 
 		switch (action) {
@@ -305,7 +372,7 @@ public class TerminalMenu extends AbstractCraftingMenu {
 				this.moveItemStackTo(stack, INV_START, INV_END, true);
 				storage.insertStack(stack);
 				if (!stack.isEmpty()) {
-					player.getInventory().placeItemBackInInventory(stack);
+					player.getInventory().placeItemBackInInventory(stack, Prediction.SERVER_ONLY);
 				}
 			}
 			case StorageClickPayload.INSERT_ALL -> {
@@ -349,6 +416,10 @@ public class TerminalMenu extends AbstractCraftingMenu {
 
 	@Override
 	public void clicked(int slotIndex, int buttonNum, ContainerInput containerInput, Player player) {
+		if (this.isLockedClick(slotIndex, buttonNum, containerInput, player)) {
+			// e.g. shift-clicking the wireless terminal in use would store it and close the menu
+			return;
+		}
 		if (slotIndex == RESULT_SLOT && (containerInput == ContainerInput.QUICK_MOVE || containerInput == ContainerInput.THROW)) {
 			// Shift-click and ctrl+Q repeat crafting in a loop. Because the grid refills itself from the storage,
 			// limit them to a full stack of output (or as much as the grid holds, if that is more).
@@ -373,10 +444,21 @@ public class TerminalMenu extends AbstractCraftingMenu {
 		}
 	}
 
+	private boolean isLockedClick(int slotIndex, int buttonNum, ContainerInput containerInput, Player player) {
+		ItemStack locked = this.host != null ? this.host.lockedItem(player) : ItemStack.EMPTY;
+		if (locked.isEmpty()) {
+			return false;
+		}
+		if (slotIndex >= 0 && slotIndex < this.slots.size() && this.slots.get(slotIndex).getItem() == locked) {
+			return true;
+		}
+		return containerInput == ContainerInput.SWAP && player.getInventory().getItem(buttonNum) == locked;
+	}
+
 	@Override
 	public ItemStack quickMoveStack(Player player, int slotIndex) {
 		Slot slot = this.slots.get(slotIndex);
-		if (slot == null || !slot.hasItem() || this.terminal == null) {
+		if (slot == null || !slot.hasItem() || this.host == null) {
 			// The client does not predict shift-clicks; the server answers with the real result.
 			return ItemStack.EMPTY;
 		}
@@ -387,7 +469,10 @@ public class TerminalMenu extends AbstractCraftingMenu {
 
 		ItemStack stack = slot.getItem();
 		int before = stack.getCount();
-		this.terminal.getStorage().insertStack(stack);
+		TerminalStorage storage = this.storage();
+		if (storage != null) {
+			storage.insertStack(stack);
+		}
 		if (stack.getCount() == before) {
 			// Not storable (e.g. a filled terminal): fall back to vanilla inventory <-> hotbar moves.
 			boolean moved;
@@ -433,9 +518,12 @@ public class TerminalMenu extends AbstractCraftingMenu {
 		slot.onTake(player, stack);
 		if (!stack.isEmpty()) {
 			// Did not fully fit into the inventory: keep the rest in the storage instead of dropping it.
-			this.terminal.getStorage().insertStack(stack);
+			TerminalStorage storage = this.storage();
+			if (storage != null) {
+				storage.insertStack(stack);
+			}
 			if (!stack.isEmpty()) {
-				player.drop(stack, false);
+				player.drop(stack, false, Prediction.SERVER_ONLY);
 			}
 		}
 		return original;
@@ -469,11 +557,9 @@ public class TerminalMenu extends AbstractCraftingMenu {
 	}
 
 	private void refreshCraftingResult() {
-		this.access.execute((level, pos) -> {
-			if (level instanceof ServerLevel serverLevel) {
-				this.updateCraftingResult(serverLevel, null);
-			}
-		});
+		if (this.host != null && this.player.level() instanceof ServerLevel serverLevel) {
+			this.updateCraftingResult(serverLevel, null);
+		}
 	}
 
 	private void updateCraftingResult(ServerLevel level, @Nullable RecipeHolder<CraftingRecipe> hint) {
@@ -504,7 +590,10 @@ public class TerminalMenu extends AbstractCraftingMenu {
 
 	/** After crafting: top the grid back up to what it was, pulling from the storage. */
 	private void refillGrid(ItemStack[] before, Player player) {
-		TerminalStorage storage = this.terminal.getStorage();
+		TerminalStorage storage = this.storage();
+		if (storage == null) {
+			return;
+		}
 		for (int i = 0; i < before.length; i++) {
 			ItemStack wanted = before[i];
 			if (wanted.isEmpty()) {
@@ -516,7 +605,7 @@ public class TerminalMenu extends AbstractCraftingMenu {
 				ItemStack remainder = this.craftSlots.removeItemNoUpdate(i);
 				storage.insertStack(remainder);
 				if (!remainder.isEmpty()) {
-					player.getInventory().placeItemBackInInventory(remainder);
+					player.getInventory().placeItemBackInInventory(remainder, Prediction.SERVER_ONLY);
 				}
 				current = ItemStack.EMPTY;
 			}
@@ -549,7 +638,7 @@ public class TerminalMenu extends AbstractCraftingMenu {
 		@Override
 		public void onTake(Player player, ItemStack carried) {
 			TerminalMenu.this.craftsThisClick++;
-			if (TerminalMenu.this.terminal == null) {
+			if (TerminalMenu.this.host == null) {
 				super.onTake(player, carried);
 				return;
 			}
@@ -572,7 +661,8 @@ public class TerminalMenu extends AbstractCraftingMenu {
 	@Override
 	public void fillCraftSlotsStackedContents(StackedItemContents contents) {
 		super.fillCraftSlotsStackedContents(contents);
-		Object2LongMap<ItemVariant> source = this.terminal != null ? this.terminal.getStorage().view() : this.clientItems;
+		TerminalStorage storage = this.storage();
+		Object2LongMap<ItemVariant> source = this.host == null ? this.clientItems : storage != null ? storage.view() : Object2LongMaps.emptyMap();
 		for (Object2LongMap.Entry<ItemVariant> entry : source.object2LongEntrySet()) {
 			int count = (int) Math.min(entry.getLongValue(), 64L * 9);
 			ItemStack stack = entry.getKey().toStack(count);
@@ -586,7 +676,7 @@ public class TerminalMenu extends AbstractCraftingMenu {
 	public PostPlaceAction handlePlacement(
 		boolean useMaxItems, boolean allowDroppingItemsToClear, RecipeHolder<?> recipe, ServerLevel level, Inventory inventory
 	) {
-		if (this.terminal == null) {
+		if (this.storage() == null) {
 			return super.handlePlacement(useMaxItems, allowDroppingItemsToClear, recipe, level, inventory);
 		}
 		@SuppressWarnings("unchecked")
@@ -668,7 +758,7 @@ public class TerminalMenu extends AbstractCraftingMenu {
 
 	/** Takes up to {@code amount} items of the given type: storage first, then the player inventory. */
 	private ItemStack takeIngredient(Holder<Item> item, int amount, Inventory inventory) {
-		TerminalStorage storage = this.terminal.getStorage();
+		TerminalStorage storage = Objects.requireNonNull(this.storage());
 		ItemVariant plain = ItemVariant.of(item.value());
 		ItemStack result = storage.extractStack(plain, amount);
 

@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/orientable",
+  "textures": {
+    "front": "simpleme:block/transfer_chest_front_off",
+    "side": "simpleme:block/transfer_chest_side",
+    "top": "simpleme:block/transfer_chest_top"
+  }
+}

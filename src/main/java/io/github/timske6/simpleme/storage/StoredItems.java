@@ -26,7 +26,7 @@ public record StoredItems(List<Entry> entries) {
 	public long totalCount() {
 		long total = 0;
 		for (Entry entry : entries) {
-			total += entry.count();
+			total = entry.count() > Long.MAX_VALUE - total ? Long.MAX_VALUE : total + entry.count();
 		}
 		return total;
 	}

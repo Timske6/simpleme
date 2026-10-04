@@ -1,10 +1,11 @@
 package io.github.timske6.simpleme.test;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import io.github.timske6.simpleme.ModRegistry;
 import io.github.timske6.simpleme.block.TerminalBlockEntity;
 import io.github.timske6.simpleme.client.TerminalScreen;
 import io.github.timske6.simpleme.menu.TerminalMenu;
-import io.github.timske6.simpleme.storage.TerminalContents;
+import io.github.timske6.simpleme.storage.Networks;
 import io.github.timske6.simpleme.storage.TerminalStorage;
 import java.util.List;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
@@ -26,7 +27,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.phys.AABB;
-import org.lwjgl.glfw.GLFW;
 
 @SuppressWarnings("UnstableApiUsage")
 public class TerminalClientGameTest implements FabricClientGameTest {
@@ -48,7 +48,7 @@ public class TerminalClientGameTest implements FabricClientGameTest {
 			server.runCommand("item replace block 0 -59 -3 container.0 with coal 5");
 
 			server.runOnServer(s -> {
-				TerminalStorage storage = terminal(s).getStorage();
+				TerminalStorage storage = TestItems.connectNewNetwork(s, TERMINAL, "Test");
 				storage.insert(ItemVariant.of(Items.STONE), 12_345);
 				storage.insert(ItemVariant.of(Items.COBBLESTONE), 120);
 				storage.insert(ItemVariant.of(Items.OAK_LOG), 64);
@@ -79,7 +79,7 @@ public class TerminalClientGameTest implements FabricClientGameTest {
 			context.takeScreenshot("simpleme-01-terminal-open");
 
 			// --- click the first grid entry: takes a full stack onto the cursor ------------------
-			clickGui(context, 8 + 8, 18 + 8, GLFW.GLFW_MOUSE_BUTTON_LEFT);
+			clickGui(context, 8 + 8, 18 + 8, InputConstants.MOUSE_BUTTON_LEFT);
 			context.waitTicks(5);
 			// sorted by name the first entry is coal (5 pieces)
 			ItemStack carried = context.computeOnClient(mc -> mc.player.containerMenu.getCarried().copy());
@@ -87,19 +87,19 @@ public class TerminalClientGameTest implements FabricClientGameTest {
 			context.takeScreenshot("simpleme-02-carrying");
 
 			// --- click again on the grid: puts it back ---------------------------------------
-			clickGui(context, 8 + 18 * 4 + 8, 18 + 8, GLFW.GLFW_MOUSE_BUTTON_LEFT);
+			clickGui(context, 8 + 18 * 4 + 8, 18 + 8, InputConstants.MOUSE_BUTTON_LEFT);
 			context.waitTicks(5);
 			check(context.computeOnClient(mc -> mc.player.containerMenu.getCarried().isEmpty()), "cursor should be empty after inserting");
 
 			// --- typing into the search box filters the grid ---------------------------------
-			clickGui(context, 82 + 20, 4 + 6, GLFW.GLFW_MOUSE_BUTTON_LEFT);
+			clickGui(context, 82 + 20, 4 + 6, InputConstants.MOUSE_BUTTON_LEFT);
 			context.getInput().typeChars("iron");
 			context.waitTicks(3);
 			visible = context.computeOnClient(mc -> ((TerminalScreen) mc.gui.screen()).visibleEntryCount());
 			check(visible == 1, "search 'iron' should show 1 entry, got " + visible);
 			context.takeScreenshot("simpleme-03-search");
-			context.getInput().pressKey(GLFW.GLFW_KEY_ENTER);
-			clickGui(context, 82 + 20, 4 + 6, GLFW.GLFW_MOUSE_BUTTON_RIGHT);
+			context.getInput().pressKey(InputConstants.KEY_RETURN);
+			clickGui(context, 82 + 20, 4 + 6, InputConstants.MOUSE_BUTTON_RIGHT);
 			context.waitTicks(3);
 			visible = context.computeOnClient(mc -> ((TerminalScreen) mc.gui.screen()).visibleEntryCount());
 			check(visible == 11, "right-clicking the search box should clear it, got " + visible);
@@ -149,7 +149,7 @@ public class TerminalClientGameTest implements FabricClientGameTest {
 			context.takeScreenshot("simpleme-06-cake");
 
 			// put the cake into the storage, then clear the crafting grid via the × button
-			clickGui(context, 8 + 8, 18 + 8, GLFW.GLFW_MOUSE_BUTTON_LEFT);
+			clickGui(context, 8 + 8, 18 + 8, InputConstants.MOUSE_BUTTON_LEFT);
 			context.waitTicks(3);
 			context.runOnClient(mc -> mc.gameMode.handleInventoryButtonClick(mc.player.containerMenu.containerId, TerminalMenu.BUTTON_CLEAR_GRID));
 			context.waitTicks(5);
@@ -168,13 +168,13 @@ public class TerminalClientGameTest implements FabricClientGameTest {
 
 			// --- recipe book open --------------------------------------------------------------
 			context.runOnClient(mc -> mc.player.getRecipeBook().setOpen(net.minecraft.world.inventory.RecipeBookType.CRAFTING, true));
-			context.getInput().pressKey(GLFW.GLFW_KEY_ESCAPE);
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 			context.waitTicks(3);
 			context.getInput().pressKey(options -> options.keyUse);
 			context.waitForScreen(TerminalScreen.class);
 			context.waitTicks(5);
 			context.takeScreenshot("simpleme-08-recipe-book");
-			context.getInput().pressKey(GLFW.GLFW_KEY_ESCAPE);
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 			context.waitTicks(3);
 
 			// --- GUI scale 3 gives room for more rows -------------------------------------------
@@ -189,40 +189,62 @@ public class TerminalClientGameTest implements FabricClientGameTest {
 			int rows = context.computeOnClient(mc -> ((TerminalScreen) mc.gui.screen()).getMenu().rows);
 			check(rows == 8, "GUI scale 3 at 1080p should show 8 rows, got " + rows);
 			context.takeScreenshot("simpleme-09-gui-scale-3");
-			context.getInput().pressKey(GLFW.GLFW_KEY_ESCAPE);
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 			context.runOnClient(mc -> {
 				mc.options.guiScale().set(0);
 				mc.resizeGui();
 			});
 			context.waitTicks(3);
 
-			// --- breaking keeps the items in the dropped block ------------------------------------
+			// --- breaking: the items stay in the network, the terminal drops plain -------------------
 			long typesBefore = server.computeOnServer(s -> (long) terminal(s).getStorage().typeCount());
 			server.runCommand("setblock 0 -59 -3 air");
 			server.runCommand("setblock 0 -60 -3 air destroy");
 			context.waitTicks(5);
-			TerminalContents dropped = server.computeOnServer(s -> {
+			boolean plainDrop = server.computeOnServer(s -> {
 				List<ItemEntity> items = s.overworld().getEntitiesOfClass(ItemEntity.class, new AABB(TERMINAL).inflate(3),
 					entity -> entity.getItem().is(ModRegistry.TERMINAL_ITEM));
-				return items.isEmpty() ? null : items.getFirst().getItem().get(ModRegistry.STORAGE);
+				boolean plain = items.size() == 1 && ItemStack.isSameItemSameComponents(items.getFirst().getItem(), new ItemStack(ModRegistry.TERMINAL_ITEM));
+				items.forEach(ItemEntity::discard);
+				return plain;
 			});
-			check(dropped != null && dropped.types() == typesBefore,
-				"dropped terminal should contain " + typesBefore + " item types, got " + dropped);
+			check(plainDrop, "a broken terminal drops a plain terminal");
 
-			// give it to the player and show the tooltip in the inventory
-			server.runOnServer(s -> {
-				ServerPlayer player = s.getPlayerList().getPlayers().getFirst();
-				ItemStack stack = new ItemStack(ModRegistry.TERMINAL_ITEM);
-				stack.set(ModRegistry.STORAGE, dropped);
-				player.getInventory().setItem(0, stack);
-			});
+			// --- a new terminal: the network panel opens by itself, connect with the mouse -------------
+			server.runCommand("setblock 0 -60 -3 simpleme:terminal[facing=south]");
 			context.waitTicks(3);
-			context.takeScreenshot("simpleme-10-dropped-item");
+			context.getInput().lookAt(TERMINAL);
+			context.getInput().pressKey(options -> options.keyUse);
+			context.waitForScreen(TerminalScreen.class);
+			context.waitFor(mc -> TestItems.screen(mc) != null && TestItems.screen(mc).isNetworkPanelOpen(), 100);
+			context.waitTicks(3);
+			context.takeScreenshot("simpleme-10-network-panel");
+			TestItems.connectFirstNetwork(context);
+			context.waitFor(mc -> TestItems.screen(mc).visibleEntryCount() == typesBefore, 100);
+			check(!context.computeOnClient(mc -> TestItems.screen(mc).isNetworkPanelOpen()), "panel closes after connecting");
+			context.takeScreenshot("simpleme-11-connected-again");
 
-			// --- persistence: storage survives a world reload --------------------------------------
+			// --- create a second network in the GUI: the terminal switches to it --------------------------
+			clickGui(context, 6 + 30, 3 + 6, InputConstants.MOUSE_BUTTON_LEFT);
+			check(context.computeOnClient(mc -> TestItems.screen(mc).isNetworkPanelOpen()), "the network button opens the panel");
+			TestItems.clickPanel(context, 8 + 40, 134 + 8);
+			context.getInput().typeChars("Zweites Lager");
+			TestItems.clickPanel(context, 168 + 30, 134 + 8);
+			context.waitFor(mc -> TestItems.screen(mc).visibleEntryCount() == 0, 100);
+			String name = server.computeOnServer(s -> Networks.get(s).find(terminal(s).getNetworkId()).name());
+			check(name.equals("Zweites Lager"), "terminal connected to the new network, got " + name);
+			clickGui(context, 6 + 30, 3 + 6, InputConstants.MOUSE_BUTTON_LEFT);
+			context.waitTicks(3);
+			context.takeScreenshot("simpleme-12-two-networks");
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+			context.waitTicks(3);
+
+			// --- persistence: networks survive a world reload --------------------------------------
 			server.runCommand("setblock 5 -60 -3 simpleme:terminal");
 			server.runOnServer(s -> {
 				TerminalBlockEntity be = (TerminalBlockEntity) s.overworld().getBlockEntity(RELOAD_TERMINAL);
+				TestItems.connectNewNetwork(s, RELOAD_TERMINAL, "Reload");
 				be.getStorage().insert(ItemVariant.of(Items.GOLD_INGOT), 777);
 				ItemStack book = new ItemStack(Items.ENCHANTED_BOOK);
 				book.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal("Named"));

@@ -13,7 +13,7 @@
     },
     "has_the_recipe": {
       "conditions": {
-        "recipe": "simpleme:terminal"
+        "recipes": "simpleme:terminal"
       },
       "trigger": "minecraft:recipe_unlocked"
     }

@@ -1,12 +1,9 @@
 package io.github.timske6.simpleme.block;
 
-import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
@@ -22,17 +19,11 @@ import net.minecraft.world.phys.BlockHitResult;
 import org.jspecify.annotations.Nullable;
 
 public class TerminalBlock extends BaseEntityBlock {
-	public static final MapCodec<TerminalBlock> CODEC = simpleCodec(TerminalBlock::new);
 	public static final EnumProperty<Direction> FACING = BlockStateProperties.HORIZONTAL_FACING;
 
 	public TerminalBlock(Properties properties) {
 		super(properties);
 		this.registerDefaultState(this.stateDefinition.any().setValue(FACING, Direction.NORTH));
-	}
-
-	@Override
-	protected MapCodec<? extends BaseEntityBlock> codec() {
-		return CODEC;
 	}
 
 	@Override
@@ -66,21 +57,5 @@ public class TerminalBlock extends BaseEntityBlock {
 			player.openMenu(terminal);
 		}
 		return InteractionResult.SUCCESS;
-	}
-
-	@Override
-	public BlockState playerWillDestroy(Level level, BlockPos pos, BlockState state, Player player) {
-		// Creative players get no loot-table drops; like shulker boxes, still drop a filled terminal so nothing is lost.
-		if (!level.isClientSide()
-			&& player.preventsBlockDrops()
-			&& level.getBlockEntity(pos) instanceof TerminalBlockEntity terminal
-			&& !terminal.getStorage().isEmpty()) {
-			ItemStack stack = new ItemStack(this);
-			stack.applyComponents(terminal.collectComponents());
-			ItemEntity entity = new ItemEntity(level, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, stack);
-			entity.setDefaultPickUpDelay();
-			level.addFreshEntity(entity);
-		}
-		return super.playerWillDestroy(level, pos, state, player);
 	}
 }

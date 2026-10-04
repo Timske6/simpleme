@@ -1,5 +1,6 @@
 package io.github.timske6.simpleme.test;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import static io.github.timske6.simpleme.test.TestItems.check;
 
 import io.github.timske6.simpleme.ModRegistry;
@@ -16,7 +17,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import org.lwjgl.glfw.GLFW;
 
 /**
  * Real dedicated server + client over the network: a big storage (thousands of types and
@@ -38,7 +38,7 @@ public class TerminalDedicatedServerTest implements FabricClientGameTest {
 			server.runCommand("tp @a 0.5 -60 0.5 180 20");
 			server.runCommand("setblock 0 -60 -3 simpleme:terminal[facing=south]");
 			server.runOnServer(s -> {
-				TerminalStorage storage = terminal(s).getStorage();
+				TerminalStorage storage = TestItems.connectNewNetwork(s, TERMINAL, "Test");
 				for (int i = 0; i < BOOKS; i++) {
 					storage.insert(ItemVariant.of(TestItems.bigBook(i)), 1);
 				}
@@ -61,11 +61,11 @@ public class TerminalDedicatedServerTest implements FabricClientGameTest {
 			context.takeScreenshot("simpleme-dedicated-01-open");
 
 			// first entry (sorted by name) is "Book 0": take it and put it back
-			TestItems.click(context, 16, 26, GLFW.GLFW_MOUSE_BUTTON_LEFT);
+			TestItems.click(context, 16, 26, InputConstants.MOUSE_BUTTON_LEFT);
 			context.waitFor(mc -> !mc.player.containerMenu.getCarried().isEmpty(), 100);
 			ItemStack carried = context.computeOnClient(mc -> mc.player.containerMenu.getCarried().copy());
 			check(carried.is(Items.WRITTEN_BOOK), "expected the first book on the cursor, got " + carried);
-			TestItems.click(context, 16, 26, GLFW.GLFW_MOUSE_BUTTON_LEFT);
+			TestItems.click(context, 16, 26, InputConstants.MOUSE_BUTTON_LEFT);
 			context.waitFor(mc -> mc.player.containerMenu.getCarried().isEmpty(), 100);
 
 			// scroll down with the mouse wheel
@@ -82,7 +82,7 @@ public class TerminalDedicatedServerTest implements FabricClientGameTest {
 			context.waitTicks(3);
 			context.takeScreenshot("simpleme-dedicated-03-tooltip");
 
-			context.getInput().pressKey(GLFW.GLFW_KEY_ESCAPE);
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 			context.waitTicks(3);
 
 			// --- break it, walk over the drop, carry it (the old format would kick us here) ------------
@@ -91,7 +91,7 @@ public class TerminalDedicatedServerTest implements FabricClientGameTest {
 			context.waitFor(mc -> mc.player.getInventory().countItem(ModRegistry.TERMINAL_ITEM) == 1, 200);
 			context.waitTicks(20);
 			boolean connected = context.computeOnClient(mc -> mc.getConnection() != null && !(mc.gui.screen() instanceof DisconnectedScreen));
-			check(connected, "client must stay connected while carrying a filled terminal");
+			check(connected, "client must stay connected after breaking the terminal");
 			context.takeScreenshot("simpleme-dedicated-04-carrying-terminal");
 
 			// --- place it again with the client ------------------------------------------------------
@@ -112,15 +112,17 @@ public class TerminalDedicatedServerTest implements FabricClientGameTest {
 			context.getInput().pressKey(options -> options.keyUse);
 			BlockPos placed = findTerminal(server);
 			check(placed != null, "the client should have placed the terminal");
-			int types = server.computeOnServer(s -> ((TerminalBlockEntity) s.overworld().getBlockEntity(placed)).getStorage().typeCount());
-			check(types == EXPECTED_TYPES, "re-placed terminal must have all " + EXPECTED_TYPES + " types, got " + types);
+			check(server.computeOnServer(s -> ((TerminalBlockEntity) s.overworld().getBlockEntity(placed)).getNetworkId() == null),
+				"a re-placed terminal starts without network");
 
 			context.getInput().lookAt(placed);
 			context.getInput().pressKey(options -> options.keyUse);
 			context.waitForScreen(TerminalScreen.class);
+			context.waitFor(mc -> TestItems.screen(mc) != null && TestItems.screen(mc).isNetworkPanelOpen(), 100);
+			TestItems.connectFirstNetwork(context);
 			context.waitFor(mc -> TestItems.screen(mc) != null && TestItems.screen(mc).visibleEntryCount() == EXPECTED_TYPES, 600);
 			context.takeScreenshot("simpleme-dedicated-05-replaced");
-			context.getInput().pressKey(GLFW.GLFW_KEY_ESCAPE);
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 			context.waitTicks(3);
 		}
 	}

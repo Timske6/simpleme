@@ -28,8 +28,6 @@ public class TerminalBlockItem extends BlockItem {
 		} else if (legacy != null && !legacy.entries().isEmpty()) {
 			builder.accept(Component.translatable("tooltip.simpleme.stored", String.format("%,d", legacy.totalCount()), legacy.entries().size())
 				.withStyle(ChatFormatting.GRAY));
-		} else {
-			builder.accept(Component.translatable("tooltip.simpleme.empty").withStyle(ChatFormatting.DARK_GRAY));
 		}
 	}
 }
