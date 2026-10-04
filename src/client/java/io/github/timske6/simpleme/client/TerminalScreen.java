@@ -504,6 +504,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		if (this.searchBox.isMouseOver(mouseX, mouseY)) {
 			if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT) {
 				this.searchBox.setValue("");
+				this.setFocused(this.searchBox);
+				return true;
 			}
 		} else if (this.searchBox.isFocused()) {
 			this.setFocused(null);
