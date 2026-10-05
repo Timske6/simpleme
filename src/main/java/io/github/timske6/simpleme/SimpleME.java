@@ -1,6 +1,8 @@
 package io.github.timske6.simpleme;
 
 import io.github.timske6.simpleme.menu.TerminalMenu;
+import io.github.timske6.simpleme.network.GroupActionPayload;
+import io.github.timske6.simpleme.network.GroupListPayload;
 import io.github.timske6.simpleme.network.NetworkActionPayload;
 import io.github.timske6.simpleme.network.NetworkActions;
 import io.github.timske6.simpleme.network.NetworkListPayload;
@@ -32,6 +34,8 @@ public class SimpleME implements ModInitializer {
 		PayloadTypeRegistry.clientboundPlay().registerLarge(NetworkListPayload.TYPE, NetworkListPayload.CODEC, StorageSyncPayload.MAX_SIZE);
 		PayloadTypeRegistry.serverboundPlay().register(NetworkActionPayload.TYPE, NetworkActionPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RecipeTransferPayload.TYPE, RecipeTransferPayload.CODEC);
+		PayloadTypeRegistry.clientboundPlay().registerLarge(GroupListPayload.TYPE, GroupListPayload.CODEC, StorageSyncPayload.MAX_SIZE);
+		PayloadTypeRegistry.serverboundPlay().register(GroupActionPayload.TYPE, GroupActionPayload.CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(StorageClickPayload.TYPE, (payload, context) -> {
 			ServerPlayer player = context.player();
@@ -43,6 +47,13 @@ public class SimpleME implements ModInitializer {
 			ServerPlayer player = context.player();
 			if (player.containerMenu instanceof TerminalMenu menu && menu.containerId == payload.containerId()) {
 				menu.handleRecipeTransfer(player, payload.slots(), payload.maxTransfer());
+			}
+		});
+		ServerPlayNetworking.registerGlobalReceiver(GroupActionPayload.TYPE, (payload, context) -> {
+			ServerPlayer player = context.player();
+			if (player.containerMenu instanceof TerminalMenu menu && menu.containerId == payload.containerId()) {
+				menu.handleGroupAction(player, payload);
+				menu.broadcastChanges();
 			}
 		});
 		ServerPlayNetworking.registerGlobalReceiver(NetworkActionPayload.TYPE, (payload, context) -> NetworkActions.handle(context.player(), payload));

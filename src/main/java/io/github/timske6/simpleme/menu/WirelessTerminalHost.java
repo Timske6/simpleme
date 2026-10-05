@@ -43,6 +43,21 @@ public final class WirelessTerminalHost implements TerminalHost {
 	}
 
 	@Override
+	public int getSortMode() {
+		return this.player.getItemInHand(this.hand).getOrDefault(ModRegistry.SORT_MODE, 0);
+	}
+
+	@Override
+	public void setSortMode(int mode) {
+		ItemStack held = this.player.getItemInHand(this.hand);
+		if (mode == 0) {
+			held.remove(ModRegistry.SORT_MODE);
+		} else {
+			held.set(ModRegistry.SORT_MODE, mode);
+		}
+	}
+
+	@Override
 	public boolean stillValid(Player player) {
 		return player.getItemInHand(this.hand).is(ModRegistry.WIRELESS_TERMINAL);
 	}

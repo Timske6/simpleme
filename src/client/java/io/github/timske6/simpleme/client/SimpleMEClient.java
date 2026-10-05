@@ -3,6 +3,7 @@ package io.github.timske6.simpleme.client;
 import io.github.timske6.simpleme.ModRegistry;
 import io.github.timske6.simpleme.menu.NetworkMenu;
 import io.github.timske6.simpleme.menu.TerminalMenu;
+import io.github.timske6.simpleme.network.GroupListPayload;
 import io.github.timske6.simpleme.network.NetworkListPayload;
 import io.github.timske6.simpleme.network.StorageSyncPayload;
 import net.fabricmc.api.ClientModInitializer;
@@ -26,6 +27,11 @@ public class SimpleMEClient implements ClientModInitializer {
 		ClientPlayNetworking.registerGlobalReceiver(StorageSyncPayload.TYPE, (payload, context) -> {
 			if (context.player().containerMenu instanceof TerminalMenu menu && menu.containerId == payload.containerId()) {
 				menu.applySync(payload);
+			}
+		});
+		ClientPlayNetworking.registerGlobalReceiver(GroupListPayload.TYPE, (payload, context) -> {
+			if (context.player().containerMenu instanceof TerminalMenu menu && menu.containerId == payload.containerId()) {
+				menu.applyGroups(payload);
 			}
 		});
 		ClientPlayNetworking.registerGlobalReceiver(NetworkListPayload.TYPE, (payload, context) -> {

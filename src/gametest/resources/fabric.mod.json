@@ -10,7 +10,8 @@
 			"io.github.timske6.simpleme.test.TerminalGuiClientTest",
 			"io.github.timske6.simpleme.test.LinkedStorageClientTest",
 			"io.github.timske6.simpleme.test.TerminalDedicatedServerTest",
-			"io.github.timske6.simpleme.test.JeiTransferClientTest"
+			"io.github.timske6.simpleme.test.JeiTransferClientTest",
+			"io.github.timske6.simpleme.test.GroupClientTest"
 		],
 		"jei_mod_plugin": [
 			"io.github.timske6.simpleme.test.TestJeiPlugin"

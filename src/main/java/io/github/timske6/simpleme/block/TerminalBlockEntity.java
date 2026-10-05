@@ -38,8 +38,10 @@ public class TerminalBlockEntity extends BlockEntity implements ExtendedMenuProv
 	private static final String NETWORK_TAG = "Storage";
 	/** Pre-release format that kept the items inside the block entity; migrated on first use. */
 	private static final String LEGACY_ITEMS_TAG = "Items";
+	private static final String SORT_TAG = "Sort";
 
 	private @Nullable UUID networkId;
+	private int sortMode;
 	private List<StoredItems.Entry> legacyItems = List.of();
 	/** Whether items stored inside the block or item (pre-release format) have been moved into a network. */
 	private boolean migrated;
@@ -59,6 +61,17 @@ public class TerminalBlockEntity extends BlockEntity implements ExtendedMenuProv
 	public void setNetworkId(@Nullable UUID id) {
 		this.migrate();
 		this.networkId = id;
+		this.setChanged();
+	}
+
+	@Override
+	public int getSortMode() {
+		return this.sortMode;
+	}
+
+	@Override
+	public void setSortMode(int mode) {
+		this.sortMode = mode;
 		this.setChanged();
 	}
 
@@ -126,6 +139,7 @@ public class TerminalBlockEntity extends BlockEntity implements ExtendedMenuProv
 		super.loadAdditional(input);
 		this.networkId = input.read(NETWORK_TAG, UUIDUtil.CODEC).orElse(null);
 		this.legacyItems = input.listOrEmpty(LEGACY_ITEMS_TAG, StoredItems.Entry.CODEC).stream().toList();
+		this.sortMode = input.getIntOr(SORT_TAG, 0);
 		this.migrated = false;
 	}
 
@@ -134,6 +148,9 @@ public class TerminalBlockEntity extends BlockEntity implements ExtendedMenuProv
 		super.saveAdditional(output);
 		if (this.networkId != null) {
 			output.store(NETWORK_TAG, UUIDUtil.CODEC, this.networkId);
+		}
+		if (this.sortMode != 0) {
+			output.putInt(SORT_TAG, this.sortMode);
 		}
 		if (!this.legacyItems.isEmpty()) {
 			ValueOutput.TypedOutputList<StoredItems.Entry> list = output.list(LEGACY_ITEMS_TAG, StoredItems.Entry.CODEC);

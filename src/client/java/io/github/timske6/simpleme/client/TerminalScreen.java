@@ -13,6 +13,7 @@ import java.util.Map;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -25,6 +26,7 @@ import net.minecraft.client.gui.screens.recipebook.RecipeUpdateListener;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -56,8 +58,13 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	private static final int COLOR_BORDER = 0xFF000000;
 
 	/** Remembered while the game runs, so the terminal reopens the way you left it. */
-	private static SortMode sortMode = SortMode.NAME;
 	private static String lastSearch = "";
+
+	/** Set by a recipe viewer integration (JEI), see {@link RecipeKeys}. */
+	public static @Nullable RecipeKeys recipeKeys;
+
+	/** Every terminal keeps its own sorting (saved on the server, see {@link TerminalMenu#getSortMode()}). */
+	private SortMode sortMode = SortMode.NAME;
 
 	private final CraftingRecipeBookComponent recipeBook;
 	private final Map<ItemVariant, Entry> entryCache = new HashMap<>();
@@ -88,6 +95,14 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	private boolean gridClickConsumed;
 	private @Nullable Entry hoveredEntry;
 
+	private @Nullable GroupPanel groupPanel;
+	/** An item dragged from the storage grid into the group being edited. */
+	private @Nullable Entry draggedEntry;
+	/** Mouse buttons seen pressed last frame, to notice clicks that another mod (e.g. JEI) took. */
+	private boolean mouseWasPressed;
+	/** The key that opened a recipe viewer also sends a character, which must not land in the search box. */
+	private boolean swallowNextChar;
+
 	public TerminalScreen(TerminalMenu menu, Inventory inventory, Component title) {
 		super(menu, inventory, title, IMAGE_WIDTH, menu.imageHeight);
 		this.recipeBook = new CraftingRecipeBookComponent(menu);
@@ -104,6 +119,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		this.widthTooNarrow = this.width < 379;
 		this.recipeBook.init(this.width, this.height, this.minecraft, this.widthTooNarrow);
 		this.leftPos = this.recipeBook.updateScreenPosition(this.width, this.imageWidth);
+		this.sortMode = SortMode.values()[this.menu.getSortMode()];
 
 		this.searchBox = new EditBox(this.font, 0, 0, 89, 12, Component.translatable("gui.simpleme.search"));
 		this.searchBox.setMaxLength(64);
@@ -116,12 +132,12 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		});
 		this.addRenderableWidget(this.searchBox);
 
-		this.sortButton = Button.builder(sortMode.label(), button -> {
-			sortMode = sortMode.next();
-			button.setMessage(sortMode.label());
-			button.setTooltip(Tooltip.create(sortMode.tooltip()));
-			this.refreshEntries(true, false);
-		}).size(18, 14).tooltip(Tooltip.create(sortMode.tooltip())).build();
+		this.sortButton = Button.builder(this.sortMode.label(), button -> {
+			SortMode next = this.sortMode.next();
+			this.menu.setClientSortMode(next.ordinal());
+			this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, TerminalMenu.BUTTON_SORT + next.ordinal());
+			this.applySortMode(next);
+		}).size(18, 14).tooltip(Tooltip.create(this.sortMode.tooltip())).build();
 		this.addRenderableWidget(this.sortButton);
 
 		this.clearButton = Button.builder(Component.literal("×"),
@@ -133,8 +149,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 		this.recipeButton = new ImageButton(0, 0, 20, 18, RecipeBookComponent.RECIPE_BUTTON_SPRITES, button -> {
 			this.recipeBook.toggleVisibility();
-			this.leftPos = this.recipeBook.updateScreenPosition(this.width, this.imageWidth);
-			this.layoutWidgets();
+			this.relayout(false);
 		});
 		this.addRenderableWidget(this.recipeButton);
 		this.addWidget(this.recipeBook);
@@ -149,9 +164,49 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		}
 		this.networkPanel.layout(this.width, this.height);
 		this.seenNetworkRevision = -1;
+		if (this.groupPanel == null) {
+			this.groupPanel = new GroupPanel(this.minecraft, this.menu, this);
+		}
 
-		this.layoutWidgets();
+		this.relayout(false);
 		this.refreshEntries(false, false);
+	}
+
+	/**
+	 * Places the terminal: next to the recipe book (if open) and with room for the group panel on its
+	 * right (if open). If both do not fit, the one that was opened last stays open.
+	 *
+	 * @param groupsOpened the group panel was just opened (otherwise the recipe book wins)
+	 */
+	void relayout(boolean groupsOpened) {
+		this.leftPos = this.recipeBook.updateScreenPosition(this.width, this.imageWidth);
+		if (GroupPanel.isExpanded()) {
+			if (this.overflow() > 0 && this.recipeBook.isVisible() && !this.widthTooNarrow) {
+				if (groupsOpened) {
+					this.recipeBook.toggleVisibility();
+				} else {
+					this.groupPanel.collapse();
+				}
+				this.leftPos = this.recipeBook.updateScreenPosition(this.width, this.imageWidth);
+			}
+			if (GroupPanel.isExpanded()) {
+				this.leftPos = Math.max(0, this.leftPos - Math.max(0, this.overflow()));
+			}
+		}
+		this.layoutWidgets();
+		this.groupPanel.layout(this.leftPos + this.imageWidth, this.topPos, this.imageHeight);
+	}
+
+	/** How far the open group panel would stick out of the screen on the right. */
+	private int overflow() {
+		return this.leftPos + this.imageWidth + 2 + GroupPanel.WIDTH + 2 - this.width;
+	}
+
+	private void applySortMode(SortMode mode) {
+		this.sortMode = mode;
+		this.sortButton.setMessage(mode.label());
+		this.sortButton.setTooltip(Tooltip.create(mode.tooltip()));
+		this.refreshEntries(true, false);
 	}
 
 	private void layoutWidgets() {
@@ -202,6 +257,11 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		this.recipeBook.tick();
 		this.updateNetworkButton();
 		this.networkPanel.tick();
+		this.groupPanel.tick();
+		if (this.menu.getSortMode() != this.sortMode.ordinal()) {
+			// the sorting of this terminal arrived from the server (or another player changed it)
+			this.applySortMode(SortMode.values()[this.menu.getSortMode()]);
+		}
 		if (this.menu.getClientRevision() != this.seenRevision) {
 			boolean full = this.menu.getClientFullSyncs() != this.seenFullSyncs;
 			this.seenFullSyncs = this.menu.getClientFullSyncs();
@@ -234,7 +294,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 			}
 		}
 		if (resort) {
-			this.order.sort(sortMode.comparator);
+			this.order.sort(this.sortMode.comparator);
 		}
 
 		List<String> terms = new ArrayList<>();
@@ -274,6 +334,10 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		return !this.interactionBlocked() && !this.panelOpen() && x >= 0 && y >= 0 && x < 14 && y < this.menu.rows * 18;
 	}
 
+	private boolean isOverGroupPanel(double mouseX, double mouseY) {
+		return this.groupPanel != null && this.groupPanel.area().contains((int) Math.floor(mouseX), (int) Math.floor(mouseY));
+	}
+
 	private @Nullable Entry entryAt(double mouseX, double mouseY) {
 		if (!this.isOverGrid(mouseX, mouseY)) {
 			return null;
@@ -301,11 +365,13 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		// with the network panel open, nothing below it reacts to the mouse
 		int x = panel ? -1000 : mouseX;
 		int y = panel ? -1000 : mouseY;
+		this.unfocusOnForeignClick(mouseX, mouseY);
 		if (this.interactionBlocked()) {
 			this.extractBackground(graphics, x, y, a);
 		} else {
 			super.extractContents(graphics, x, y, a);
 		}
+		this.groupPanel.extractRenderState(graphics, x, y, a, this.draggedEntry != null);
 		graphics.nextStratum();
 		this.recipeBook.extractRenderState(graphics, x, y, a);
 		graphics.nextStratum();
@@ -316,6 +382,10 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 			return;
 		}
 		this.extractCarriedItem(graphics, mouseX, mouseY);
+		if (this.draggedEntry != null) {
+			graphics.nextStratum();
+			graphics.item(this.draggedEntry.stack, mouseX - 8, mouseY - 8);
+		}
 		this.extractTooltip(graphics, mouseX, mouseY);
 		this.recipeBook.extractTooltip(graphics, mouseX, mouseY, this.hoveredSlot);
 	}
@@ -405,18 +475,22 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	}
 
 	private void extractCount(GuiGraphicsExtractor graphics, long count, int x, int y) {
+		drawCount(graphics, this.font, count, x, y);
+	}
+
+	static void drawCount(GuiGraphicsExtractor graphics, Font font, long count, int x, int y) {
 		if (count == 1) {
 			return;
 		}
 		String text = formatCount(count);
 		// Up to two digits look like vanilla; bigger numbers use half-size text so they stay inside the cell.
 		if (count < 100) {
-			graphics.text(this.font, text, x + 17 - this.font.width(text), y + 9, 0xFFFFFFFF, true);
+			graphics.text(font, text, x + 17 - font.width(text), y + 9, 0xFFFFFFFF, true);
 		} else {
 			graphics.pose().pushMatrix();
-			graphics.pose().translate(x + 16 - this.font.width(text) / 2.0F, y + 12);
+			graphics.pose().translate(x + 16 - font.width(text) / 2.0F, y + 12);
 			graphics.pose().scale(0.5F, 0.5F);
-			graphics.text(this.font, text, 0, 0, 0xFFFFFFFF, true);
+			graphics.text(font, text, 0, 0, 0xFFFFFFFF, true);
 			graphics.pose().popMatrix();
 		}
 	}
@@ -443,7 +517,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	protected void extractTooltip(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		super.extractTooltip(graphics, mouseX, mouseY);
 		Entry entry = this.hoveredEntry;
-		if (entry != null && this.menu.getCarried().isEmpty()) {
+		if (entry != null && this.menu.getCarried().isEmpty() && this.draggedEntry == null) {
 			List<Component> lines = new ArrayList<>(getTooltipFromItem(this.minecraft, entry.stack));
 			lines.add(Component.translatable("gui.simpleme.stored", String.format("%,d", entry.count)).withStyle(ChatFormatting.GRAY));
 			graphics.setTooltipForNextFrame(this.font, lines, entry.stack.getTooltipImage(), mouseX, mouseY, entry.stack.get(DataComponents.TOOLTIP_STYLE));
@@ -474,7 +548,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		drawSlot(graphics, x, y, size, size);
 	}
 
-	private static void drawSlot(GuiGraphicsExtractor graphics, int x, int y, int width, int height) {
+	static void drawSlot(GuiGraphicsExtractor graphics, int x, int y, int width, int height) {
 		graphics.fill(x, y, x + width, y + height, COLOR_SLOT);
 		graphics.fill(x, y, x + width - 1, y + 1, COLOR_DARK);
 		graphics.fill(x, y, x + 1, y + height - 1, COLOR_DARK);
@@ -491,6 +565,14 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		if (this.panelOpen()) {
 			return this.networkPanel.mouseClicked(event, doubleClick);
 		}
+		double mouseX = event.x();
+		double mouseY = event.y();
+		if (!this.searchBox.isMouseOver(mouseX, mouseY) && this.searchBox.isFocused()) {
+			this.setFocused(null);
+		}
+		if (this.groupPanel.mouseClicked(event, doubleClick)) {
+			return true;
+		}
 		if (this.recipeBook.mouseClicked(event, doubleClick)) {
 			this.setFocused(this.recipeBook);
 			return true;
@@ -499,16 +581,10 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 			return true;
 		}
 
-		double mouseX = event.x();
-		double mouseY = event.y();
-		if (this.searchBox.isMouseOver(mouseX, mouseY)) {
-			if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT) {
-				this.searchBox.setValue("");
-				this.setFocused(this.searchBox);
-				return true;
-			}
-		} else if (this.searchBox.isFocused()) {
-			this.setFocused(null);
+		if (this.searchBox.isMouseOver(mouseX, mouseY) && event.button() == InputConstants.MOUSE_BUTTON_RIGHT) {
+			this.searchBox.setValue("");
+			this.setFocused(this.searchBox);
+			return true;
 		}
 
 		if (this.isOverScrollbar(mouseX, mouseY)) {
@@ -525,6 +601,22 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	}
 
 	private void handleGridClick(MouseButtonEvent event, double mouseX, double mouseY) {
+		Entry entry = this.entryAt(mouseX, mouseY);
+		if (this.groupPanel.isEditing()) {
+			// while a group is edited, items are dragged from the grid into it instead of taken out
+			if (entry != null && this.menu.getCarried().isEmpty() && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
+				this.draggedEntry = entry;
+			}
+			return;
+		}
+		this.clickStorageItem(event, entry != null ? entry.variant : null);
+	}
+
+	/**
+	 * A click on an item of the storage (in the grid or in a group): take it out, or store the item
+	 * on the cursor ({@code variant} may be {@code null} then).
+	 */
+	void clickStorageItem(MouseButtonEvent event, @Nullable ItemVariant clicked) {
 		ItemStack carried = this.menu.getCarried();
 		int button = event.button();
 		ItemVariant variant;
@@ -539,11 +631,10 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 				return;
 			}
 		} else {
-			Entry entry = this.entryAt(mouseX, mouseY);
-			if (entry == null) {
+			if (clicked == null) {
 				return;
 			}
-			variant = entry.variant;
+			variant = clicked;
 			if (this.minecraft.options.keyPickItem.matchesMouse(event)) {
 				if (!this.minecraft.player.hasInfiniteMaterials()) {
 					return;
@@ -570,6 +661,14 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 			this.draggingScrollbar = false;
 			return true;
 		}
+		if (this.draggedEntry != null) {
+			if (this.groupPanel.isDropTarget(event.x(), event.y())) {
+				this.groupPanel.addToEditedGroup(this.draggedEntry.variant);
+			}
+			this.draggedEntry = null;
+			this.gridClickConsumed = false;
+			return true;
+		}
 		if (this.gridClickConsumed) {
 			this.gridClickConsumed = false;
 			return true;
@@ -589,6 +688,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		if (this.gridClickConsumed) {
 			return true;
 		}
+		if (this.groupPanel.mouseDragged(event, dx, dy)) {
+			return true;
+		}
 		return this.recipeBook.mouseDragged(event, dx, dy) || super.mouseDragged(event, dx, dy);
 	}
 
@@ -596,6 +698,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
 		if (this.panelOpen()) {
 			return this.networkPanel.mouseScrolled(scrollY);
+		}
+		if (this.groupPanel.mouseScrolled(mouseX, mouseY, scrollY)) {
+			return true;
 		}
 		if (this.isOverGrid(mouseX, mouseY) || this.isOverScrollbar(mouseX, mouseY)) {
 			// Keep fractions so touchpads scroll smoothly and the mouse wheel sensitivity option is respected.
@@ -610,8 +715,12 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
+		this.swallowNextChar = false;
 		if (this.panelOpen()) {
 			return this.networkPanel.keyPressed(event);
+		}
+		if (this.groupPanel.isTyping()) {
+			return this.groupPanel.keyPressed(event);
 		}
 		if (this.searchBox.isFocused()) {
 			if (event.isEscape()) {
@@ -619,6 +728,10 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 			}
 			if (event.isConfirmation()) {
 				this.setFocused(null);
+				return true;
+			}
+			if (this.showRecipesOfHovered(event)) {
+				this.swallowNextChar = true;
 				return true;
 			}
 			this.searchBox.keyPressed(event);
@@ -632,6 +745,13 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		if (this.panelOpen()) {
 			return this.networkPanel.charTyped(event);
 		}
+		if (this.swallowNextChar) {
+			this.swallowNextChar = false;
+			return true;
+		}
+		if (this.groupPanel.isTyping()) {
+			return this.groupPanel.charTyped(event);
+		}
 		if (this.searchBox.isFocused()) {
 			return this.searchBox.charTyped(event);
 		}
@@ -643,8 +763,47 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		return !this.interactionBlocked() && !this.panelOpen() && super.isHovering(left, top, w, h, xm, ym);
 	}
 
+	/**
+	 * The recipe viewer keys (JEI: R and U) work on the item under the mouse even while the search
+	 * box has the focus; without an item under the mouse the key is typed as usual.
+	 */
+	private boolean showRecipesOfHovered(KeyEvent event) {
+		if (recipeKeys == null) {
+			return false;
+		}
+		double mouseX = this.minecraft.mouseHandler.getScaledXPos(this.minecraft.getWindow());
+		double mouseY = this.minecraft.mouseHandler.getScaledYPos(this.minecraft.getWindow());
+		StorageCell cell = this.storageCellAt(mouseX, mouseY);
+		return recipeKeys.show(event, cell != null ? cell.stack() : null);
+	}
+
+	/**
+	 * A click anywhere outside the search box takes the focus away from it, even where another mod
+	 * (e.g. JEI's item list) handles the click before the terminal sees it.
+	 */
+	private void unfocusOnForeignClick(int mouseX, int mouseY) {
+		boolean pressed = this.minecraft.mouseHandler.isLeftPressed() || this.minecraft.mouseHandler.isRightPressed()
+			|| this.minecraft.mouseHandler.isMiddlePressed();
+		if (pressed && !this.mouseWasPressed) {
+			if (this.searchBox.isFocused() && !this.searchBox.isMouseOver(mouseX, mouseY)) {
+				this.setFocused(null);
+			}
+			this.groupPanel.unfocusUnlessOver(mouseX, mouseY);
+		}
+		this.mouseWasPressed = pressed;
+	}
+
+	@Override
+	public void removed() {
+		this.groupPanel.commitName();
+		super.removed();
+	}
+
 	@Override
 	protected boolean hasClickedOutside(double mx, double my, int xo, int yo) {
+		if (this.isOverGroupPanel(mx, my)) {
+			return false;
+		}
 		boolean outside = mx < xo || my < yo || mx >= xo + this.imageWidth || my >= yo + this.imageHeight;
 		return this.recipeBook.hasClickedOutside(mx, my, this.leftPos, this.topPos, this.imageWidth, this.imageHeight) && outside;
 	}
@@ -696,6 +855,12 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	/** The item shown in the storage grid at the mouse, with its cell in screen coordinates (for recipe viewers like JEI). */
 	public @Nullable StorageCell storageCellAt(double mouseX, double mouseY) {
+		if (this.panelOpen()) {
+			return null;
+		}
+		if (this.isOverGroupPanel(mouseX, mouseY)) {
+			return this.groupPanel.cellAt(mouseX, mouseY);
+		}
 		Entry entry = this.entryAt(mouseX, mouseY);
 		if (entry == null) {
 			return null;
@@ -712,8 +877,33 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		return this.searchBox.getValue();
 	}
 
+	public boolean isSearchFocused() {
+		return this.searchBox.isFocused();
+	}
+
 	public boolean isNetworkPanelOpen() {
 		return this.panelOpen();
+	}
+
+	/** Screen areas next to the terminal that it uses (the group panel), for recipe viewers to keep free. */
+	public List<Rect2i> extraAreas() {
+		return this.groupPanel != null ? List.of(this.groupPanel.area()) : List.of();
+	}
+
+	public @Nullable GroupPanel groupPanel() {
+		return this.groupPanel;
+	}
+
+	/**
+	 * Opens a recipe viewer for the item under the mouse when its key is pressed (the terminal only
+	 * asks while its search box has the focus; otherwise the viewer gets the keys by itself).
+	 */
+	public interface RecipeKeys {
+		/**
+		 * @param hovered the item of the terminal under the mouse, or {@code null} (then the viewer's own lists are checked)
+		 * @return whether the key opened the viewer
+		 */
+		boolean show(KeyEvent event, @Nullable ItemStack hovered);
 	}
 
 	private static final class Entry {

@@ -7,6 +7,7 @@ import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.constants.RecipeTypes;
 import mezz.jei.api.registration.IGuiHandlerRegistration;
 import mezz.jei.api.registration.IRecipeTransferRegistration;
+import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.resources.Identifier;
 
 /** JEI integration, loaded by JEI through the {@code jei_mod_plugin} entrypoint (only if JEI is installed). */
@@ -20,6 +21,16 @@ public final class SimpleMEJeiPlugin implements IModPlugin {
 	@Override
 	public void registerGuiHandlers(IGuiHandlerRegistration registration) {
 		registration.addGuiContainerHandler(TerminalScreen.class, new TerminalGuiHandler());
+	}
+
+	@Override
+	public void onRuntimeAvailable(IJeiRuntime runtime) {
+		TerminalScreen.recipeKeys = new JeiRecipeKeys(runtime);
+	}
+
+	@Override
+	public void onRuntimeUnavailable() {
+		TerminalScreen.recipeKeys = null;
 	}
 
 	@Override

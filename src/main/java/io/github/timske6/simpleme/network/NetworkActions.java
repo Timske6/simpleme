@@ -1,6 +1,7 @@
 package io.github.timske6.simpleme.network;
 
 import io.github.timske6.simpleme.menu.NetworkMenu;
+import io.github.timske6.simpleme.storage.ItemGroups;
 import io.github.timske6.simpleme.storage.Networks;
 import io.github.timske6.simpleme.storage.StorageData;
 import io.github.timske6.simpleme.storage.TerminalStorage;
@@ -60,6 +61,7 @@ public final class NetworkActions {
 				if (target != null && target.canManage(player)) {
 					if (StorageData.get(server, target.id()).storage().isEmpty()) {
 						networks.delete(target);
+						ItemGroups.get(server).deleteNetwork(target.id());
 					} else {
 						player.sendOverlayMessage(Component.translatable("message.simpleme.network.not_empty").withStyle(ChatFormatting.RED));
 					}

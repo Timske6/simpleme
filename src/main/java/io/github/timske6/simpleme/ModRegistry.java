@@ -22,8 +22,10 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.ExtraCodecs;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.flag.FeatureFlags;
 import net.minecraft.world.inventory.MenuType;
@@ -70,6 +72,16 @@ public final class ModRegistry {
 		DataComponentType.<StorageLink>builder()
 			.persistent(StorageLink.CODEC)
 			.networkSynchronized(StorageLink.STREAM_CODEC)
+			.build()
+	);
+
+	/** How a wireless terminal sorts its items (placed terminals keep it in their block entity). */
+	public static final DataComponentType<Integer> SORT_MODE = Registry.register(
+		BuiltInRegistries.DATA_COMPONENT_TYPE,
+		SimpleME.id("sort_mode"),
+		DataComponentType.<Integer>builder()
+			.persistent(ExtraCodecs.NON_NEGATIVE_INT)
+			.networkSynchronized(ByteBufCodecs.VAR_INT)
 			.build()
 	);
 

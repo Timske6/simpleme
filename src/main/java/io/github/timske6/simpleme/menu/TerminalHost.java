@@ -13,6 +13,11 @@ public interface TerminalHost {
 	/** Connects to another network (access was checked), or disconnects. */
 	void setNetworkId(@Nullable UUID id);
 
+	/** How the terminal sorts its items (see {@code TerminalMenu.SORT_MODES}); every terminal keeps its own. */
+	int getSortMode();
+
+	void setSortMode(int mode);
+
 	/** Whether the menu may stay open. */
 	boolean stillValid(Player player);
 

@@ -1,9 +1,12 @@
 package io.github.timske6.simpleme.menu;
 
 import io.github.timske6.simpleme.ModRegistry;
+import io.github.timske6.simpleme.network.GroupActionPayload;
+import io.github.timske6.simpleme.network.GroupListPayload;
 import io.github.timske6.simpleme.network.NetworkActions;
 import io.github.timske6.simpleme.network.StorageClickPayload;
 import io.github.timske6.simpleme.network.StorageSyncPayload;
+import io.github.timske6.simpleme.storage.ItemGroups;
 import io.github.timske6.simpleme.storage.Networks;
 import io.github.timske6.simpleme.storage.StoredItems;
 import io.github.timske6.simpleme.storage.TerminalStorage;
@@ -20,9 +23,11 @@ import java.util.UUID;
 import java.util.function.IntSupplier;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.recipebook.PlaceRecipeHelper;
 import net.minecraft.server.level.ServerLevel;
@@ -35,6 +40,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.player.StackedItemContents;
 import net.minecraft.world.inventory.AbstractCraftingMenu;
 import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.DataSlot;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.RecipeBookType;
 import net.minecraft.world.inventory.ResultSlot;
@@ -60,6 +66,10 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 	public static final int INV_END = 46;
 
 	public static final int BUTTON_CLEAR_GRID = 0;
+	/** {@code BUTTON_SORT + mode}: the terminal sorts its items like that from now on. */
+	public static final int BUTTON_SORT = 16;
+	/** Name, count, mod. */
+	public static final int SORT_MODES = 3;
 
 	public static final int COLUMNS = 9;
 	public static final int MIN_ROWS = 3;
@@ -99,12 +109,17 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 	private boolean networkSent;
 	private @Nullable UUID sentNetworkId;
 	private boolean sentNetworkAvailable;
+	private int sentGroupsVersion = -1;
+	private @Nullable UUID sentGroupsNetwork;
 
 	// client side mirror of the storage
 	private final Object2LongLinkedOpenHashMap<ItemVariant> clientItems = new Object2LongLinkedOpenHashMap<>();
 	private int clientRevision;
 	private int clientFullSyncs;
 	private final NetworkClientState networkState = new NetworkClientState();
+	private List<GroupListPayload.Entry> clientGroups = List.of();
+	private int clientGroupsRevision;
+	private int clientSortMode;
 
 	/** Client constructor of the placed terminal (called through the menu type with the block position). */
 	public TerminalMenu(int containerId, Inventory inventory, BlockPos pos) {
@@ -129,6 +144,17 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 		this.addSlot(new TerminalResultSlot(this.player, RESULT_X, this.craftingY + 18));
 		this.addCraftingGridSlots(CRAFT_GRID_X, this.craftingY);
 		this.addStandardInventorySlots(inventory, 8, this.inventoryY);
+		this.addDataSlot(new DataSlot() {
+			@Override
+			public int get() {
+				return TerminalMenu.this.host != null ? Mth.clamp(TerminalMenu.this.host.getSortMode(), 0, SORT_MODES - 1) : TerminalMenu.this.clientSortMode;
+			}
+
+			@Override
+			public void set(int value) {
+				TerminalMenu.this.clientSortMode = value;
+			}
+		});
 	}
 
 	public boolean isServerSide() {
@@ -231,7 +257,23 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 			}
 			return true;
 		}
+		if (buttonId >= BUTTON_SORT && buttonId < BUTTON_SORT + SORT_MODES) {
+			if (this.host != null) {
+				this.host.setSortMode(buttonId - BUTTON_SORT);
+			}
+			return true;
+		}
 		return false;
+	}
+
+	/** Client: how this terminal sorts its items (synced from the server, set right away when changed here). */
+	public int getSortMode() {
+		return Mth.clamp(this.clientSortMode, 0, SORT_MODES - 1);
+	}
+
+	/** Client: the server is told with {@link #BUTTON_SORT}; this shows the new mode before its answer arrives. */
+	public void setClientSortMode(int mode) {
+		this.clientSortMode = mode;
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -256,6 +298,7 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 			this.sentNetworkAvailable = storage != null;
 			NetworkActions.sendList(serverPlayer, this.containerId, networkId);
 		}
+		this.syncGroups(serverPlayer, storage != null ? networkId : null);
 		if (storage != this.syncedStorage) {
 			this.syncedStorage = storage;
 			this.lastSentVersion = Long.MIN_VALUE;
@@ -310,6 +353,23 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 		}
 	}
 
+	private void syncGroups(ServerPlayer player, @Nullable UUID network) {
+		ItemGroups groups = ItemGroups.get(player.level().getServer());
+		if (groups.version() == this.sentGroupsVersion && Objects.equals(network, this.sentGroupsNetwork)) {
+			return;
+		}
+		this.sentGroupsVersion = groups.version();
+		this.sentGroupsNetwork = network;
+		List<GroupListPayload.Entry> entries = new ArrayList<>();
+		if (network != null) {
+			for (ItemGroups.Group group : groups.visible(network, player)) {
+				entries.add(new GroupListPayload.Entry(group.id(), group.name(), group.ownerName(), group.isShared(),
+					group.canManage(player), group.isHiddenFor(player), List.copyOf(group.items())));
+			}
+		}
+		ServerPlayNetworking.send(player, new GroupListPayload(this.containerId, entries));
+	}
+
 	/** Client: apply a sync packet to the local mirror. */
 	public void applySync(StorageSyncPayload payload) {
 		if (payload.reset()) {
@@ -336,6 +396,21 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 	/** Client: changes every time the synced contents change. */
 	public int getClientRevision() {
 		return this.clientRevision;
+	}
+
+	/** Client: the item groups of the connected network. */
+	public void applyGroups(GroupListPayload payload) {
+		this.clientGroups = payload.groups();
+		this.clientGroupsRevision++;
+	}
+
+	public List<GroupListPayload.Entry> getClientGroups() {
+		return this.clientGroups;
+	}
+
+	/** Client: changes every time the groups are received. */
+	public int getClientGroupsRevision() {
+		return this.clientGroupsRevision;
 	}
 
 	/** Client: changes with every packet of a complete sync (menu opened, network switched). */
@@ -413,6 +488,52 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 			}
 		}
 		this.broadcastChanges();
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Item groups (client → server)
+	// ------------------------------------------------------------------------------------------
+
+	public void handleGroupAction(ServerPlayer player, GroupActionPayload payload) {
+		UUID network = this.host != null ? this.host.getNetworkId() : null;
+		if (network == null || this.storage() == null || player.isSpectator() || !this.stillValid(player)) {
+			return;
+		}
+		ItemGroups groups = ItemGroups.get(player.level().getServer());
+		if (payload.action() == GroupActionPayload.CREATE) {
+			if (groups.ownedCount(network, player) >= ItemGroups.MAX_GROUPS) {
+				player.sendOverlayMessage(Component.translatable("message.simpleme.group.too_many", ItemGroups.MAX_GROUPS).withStyle(ChatFormatting.RED));
+			} else {
+				groups.create(payload.group(), network, player, payload.text());
+			}
+			return;
+		}
+		ItemGroups.Group group = groups.find(payload.group());
+		if (group == null || !group.network().equals(network) || !group.canSee(player)) {
+			return;
+		}
+		switch (payload.action()) {
+			case GroupActionPayload.SHOW -> groups.setHidden(group, player, false);
+			case GroupActionPayload.HIDE -> groups.setHidden(group, player, true);
+			default -> {
+				if (!group.canManage(player)) {
+					return;
+				}
+				switch (payload.action()) {
+					case GroupActionPayload.RENAME -> groups.rename(group, payload.text());
+					case GroupActionPayload.TOGGLE_SHARED -> groups.setShared(group, !group.isShared());
+					case GroupActionPayload.DELETE -> groups.delete(group);
+					case GroupActionPayload.ADD_ITEM -> payload.item().ifPresent(item -> {
+						if (!groups.addItem(group, item) && group.items().size() >= ItemGroups.MAX_ITEMS) {
+							player.sendOverlayMessage(Component.translatable("message.simpleme.group.full", ItemGroups.MAX_ITEMS).withStyle(ChatFormatting.RED));
+						}
+					});
+					case GroupActionPayload.REMOVE_ITEM -> payload.item().ifPresent(item -> groups.removeItem(group, item));
+					default -> {
+					}
+				}
+			}
+		}
 	}
 
 	private static int maxStackSize(ItemVariant variant) {
