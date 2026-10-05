@@ -37,6 +37,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.display.RecipeDisplay;
 import org.jspecify.annotations.Nullable;
 
@@ -45,6 +46,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	private static final Identifier SCROLLER_DISABLED_SPRITE = Identifier.withDefaultNamespace("container/creative_inventory/scroller_disabled");
 	private static final Identifier SLOT_HIGHLIGHT_BACK_SPRITE = Identifier.withDefaultNamespace("container/slot_highlight_back");
 	private static final Identifier SLOT_HIGHLIGHT_FRONT_SPRITE = Identifier.withDefaultNamespace("container/slot_highlight_front");
+
+	private static final ItemStack GROUP_ICON = new ItemStack(Items.CHEST);
 
 	private static final int IMAGE_WIDTH = 195;
 	private static final int SCROLLBAR_X = 175;
@@ -82,6 +85,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	private Button sortButton;
 	private Button clearButton;
 	private ImageButton recipeButton;
+	private Button groupButton;
 	private Button networkButton;
 	private @Nullable NetworkPanel networkPanel;
 	private int seenNetworkRevision = -1;
@@ -102,6 +106,11 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	private boolean mouseWasPressed;
 	/** The key that opened a recipe viewer also sends a character, which must not land in the search box. */
 	private boolean swallowNextChar;
+	/**
+	 * Ticks to wait for the server to confirm a sorting chosen here. Meanwhile older values from the
+	 * server (e.g. of a fast double click) are ignored, so the grid does not jump back and forth.
+	 */
+	private int sortPendingTicks;
 
 	public TerminalScreen(TerminalMenu menu, Inventory inventory, Component title) {
 		super(menu, inventory, title, IMAGE_WIDTH, menu.imageHeight);
@@ -134,8 +143,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 		this.sortButton = Button.builder(this.sortMode.label(), button -> {
 			SortMode next = this.sortMode.next();
-			this.menu.setClientSortMode(next.ordinal());
 			this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, TerminalMenu.BUTTON_SORT + next.ordinal());
+			this.sortPendingTicks = 20;
 			this.applySortMode(next);
 		}).size(18, 14).tooltip(Tooltip.create(this.sortMode.tooltip())).build();
 		this.addRenderableWidget(this.sortButton);
@@ -153,6 +162,13 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		});
 		this.addRenderableWidget(this.recipeButton);
 		this.addWidget(this.recipeBook);
+
+		// the chest icon is drawn on top in extractRenderState
+		this.groupButton = Button.builder(Component.empty(), button -> this.groupPanel.setExpanded(!GroupPanel.isExpanded()))
+			.size(20, 18)
+			.tooltip(Tooltip.create(Component.translatable("gui.simpleme.group.open")))
+			.build();
+		this.addRenderableWidget(this.groupButton);
 
 		this.networkButton = Button.builder(Component.empty(), button -> this.networkPanel.open())
 			.size(73, 13)
@@ -173,33 +189,28 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	}
 
 	/**
-	 * Places the terminal: next to the recipe book (if open) and with room for the group panel on its
-	 * right (if open). If both do not fit, the one that was opened last stays open.
+	 * Places the terminal. The recipe book and the group panel both open on the left side, so only
+	 * one of them is open at a time: the one opened last.
 	 *
 	 * @param groupsOpened the group panel was just opened (otherwise the recipe book wins)
 	 */
 	void relayout(boolean groupsOpened) {
-		this.leftPos = this.recipeBook.updateScreenPosition(this.width, this.imageWidth);
-		if (GroupPanel.isExpanded()) {
-			if (this.overflow() > 0 && this.recipeBook.isVisible() && !this.widthTooNarrow) {
-				if (groupsOpened) {
-					this.recipeBook.toggleVisibility();
-				} else {
-					this.groupPanel.collapse();
-				}
-				this.leftPos = this.recipeBook.updateScreenPosition(this.width, this.imageWidth);
-			}
-			if (GroupPanel.isExpanded()) {
-				this.leftPos = Math.max(0, this.leftPos - Math.max(0, this.overflow()));
+		if (GroupPanel.isExpanded() && this.recipeBook.isVisible()) {
+			if (groupsOpened) {
+				this.recipeBook.toggleVisibility();
+			} else {
+				this.groupPanel.collapse();
 			}
 		}
+		if (GroupPanel.isExpanded()) {
+			// terminal and panel together in the middle of the screen
+			int panel = GroupPanel.WIDTH + 2;
+			this.leftPos = (this.width - this.imageWidth - panel) / 2 + panel;
+		} else {
+			this.leftPos = this.recipeBook.updateScreenPosition(this.width, this.imageWidth);
+		}
 		this.layoutWidgets();
-		this.groupPanel.layout(this.leftPos + this.imageWidth, this.topPos, this.imageHeight);
-	}
-
-	/** How far the open group panel would stick out of the screen on the right. */
-	private int overflow() {
-		return this.leftPos + this.imageWidth + 2 + GroupPanel.WIDTH + 2 - this.width;
+		this.groupPanel.layout(this.leftPos, this.topPos, this.imageHeight);
 	}
 
 	private void applySortMode(SortMode mode) {
@@ -218,6 +229,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		this.clearButton.setY(this.topPos + this.menu.craftingY + 19);
 		this.recipeButton.setX(this.leftPos + 152);
 		this.recipeButton.setY(this.topPos + this.menu.craftingY + 17);
+		this.groupButton.setX(this.leftPos + 152);
+		this.groupButton.setY(this.topPos + this.menu.craftingY - 3);
 		this.networkButton.setX(this.leftPos + 6);
 		this.networkButton.setY(this.topPos + 3);
 	}
@@ -258,14 +271,14 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 		this.updateNetworkButton();
 		this.networkPanel.tick();
 		this.groupPanel.tick();
-		if (this.menu.getSortMode() != this.sortMode.ordinal()) {
+		if (this.sortPendingTicks > 0) {
+			this.sortPendingTicks = this.menu.getSortMode() == this.sortMode.ordinal() ? 0 : this.sortPendingTicks - 1;
+		} else if (this.menu.getSortMode() != this.sortMode.ordinal()) {
 			// the sorting of this terminal arrived from the server (or another player changed it)
 			this.applySortMode(SortMode.values()[this.menu.getSortMode()]);
 		}
 		if (this.menu.getClientRevision() != this.seenRevision) {
-			boolean full = this.menu.getClientFullSyncs() != this.seenFullSyncs;
-			this.seenFullSyncs = this.menu.getClientFullSyncs();
-			this.refreshEntries(full, full);
+			this.refreshEntries(false, false);
 			// Makes the recipe book re-check which recipes can be crafted with the new storage contents.
 			this.minecraft.player.getInventory().setChanged();
 		}
@@ -276,6 +289,14 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	 * @param dropEmpty forget item types that ran out (otherwise they are shown with 0)
 	 */
 	private void refreshEntries(boolean resort, boolean dropEmpty) {
+		// A complete sync (terminal opened, network switched) always sorts again and forgets empty
+		// types, whichever refresh sees it first (it may arrive before the screen is set up, or right
+		// before a search change).
+		if (this.menu.getClientFullSyncs() != this.seenFullSyncs) {
+			this.seenFullSyncs = this.menu.getClientFullSyncs();
+			resort = true;
+			dropEmpty = true;
+		}
 		this.seenRevision = this.menu.getClientRevision();
 		Object2LongMap<ItemVariant> items = this.menu.getClientItems();
 		if (dropEmpty) {
@@ -335,7 +356,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 	}
 
 	private boolean isOverGroupPanel(double mouseX, double mouseY) {
-		return this.groupPanel != null && this.groupPanel.area().contains((int) Math.floor(mouseX), (int) Math.floor(mouseY));
+		return this.groupPanel != null && this.groupPanel.isOver(mouseX, mouseY);
 	}
 
 	private @Nullable Entry entryAt(double mouseX, double mouseY) {
@@ -372,6 +393,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 			super.extractContents(graphics, x, y, a);
 		}
 		this.groupPanel.extractRenderState(graphics, x, y, a, this.draggedEntry != null);
+		graphics.item(GROUP_ICON, this.groupButton.getX() + 2, this.groupButton.getY() + 1);
 		graphics.nextStratum();
 		this.recipeBook.extractRenderState(graphics, x, y, a);
 		graphics.nextStratum();
@@ -887,7 +909,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> implem
 
 	/** Screen areas next to the terminal that it uses (the group panel), for recipe viewers to keep free. */
 	public List<Rect2i> extraAreas() {
-		return this.groupPanel != null ? List.of(this.groupPanel.area()) : List.of();
+		Rect2i area = this.groupPanel != null ? this.groupPanel.area() : null;
+		return area != null ? List.of(area) : List.of();
 	}
 
 	public @Nullable GroupPanel groupPanel() {

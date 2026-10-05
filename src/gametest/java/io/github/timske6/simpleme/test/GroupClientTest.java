@@ -21,6 +21,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.inventory.RecipeBookType;
 import net.minecraft.world.item.Items;
 
 /**
@@ -31,9 +32,10 @@ import net.minecraft.world.item.Items;
 @SuppressWarnings("UnstableApiUsage")
 public class GroupClientTest implements FabricClientGameTest {
 	private static final BlockPos TERMINAL = new BlockPos(0, -60, -3);
-	/** Left edge of the group panel, relative to the terminal. */
-	private static final int PANEL_X = 195 + 2;
+	/** Left edge of the group panel (left of the terminal), relative to the terminal. */
+	private static final int PANEL_X = -(GroupPanel.WIDTH + 2);
 	private static final int LIST_X = PANEL_X + 7;
+	private static final int GROUP_BUTTON_X = 152 + 10;
 	private static final int SORT_BUTTON_X = 173 + 9;
 	private static final int SORT_BUTTON_Y = 3 + 7;
 	private static final int SEARCH_X = 82 + 20;
@@ -60,12 +62,29 @@ public class GroupClientTest implements FabricClientGameTest {
 			context.waitTicks(20);
 			open(context);
 
-			// --- open the panel and create a group ------------------------------------------------------
+			// --- the group panel and the recipe book share the left side ----------------------------------
 			check(context.computeOnClient(mc -> !GroupPanel.isExpanded()), "the group panel starts folded in");
-			TestItems.click(context, PANEL_X + 8, 18 + 11, InputConstants.MOUSE_BUTTON_LEFT);
+			int craftingY = context.computeOnClient(mc -> TestItems.screen(mc).getMenu().craftingY);
+			TestItems.click(context, 152 + 10, craftingY + 17 + 9, InputConstants.MOUSE_BUTTON_LEFT);
 			context.waitTicks(2);
-			check(context.computeOnClient(mc -> GroupPanel.isExpanded()), "clicking the tab opens the group panel");
-			TestItems.click(context, PANEL_X + 110 - 36 + 7, 4 + 7, InputConstants.MOUSE_BUTTON_LEFT);
+			check(context.computeOnClient(mc -> mc.player.getRecipeBook().isOpen(RecipeBookType.CRAFTING)), "recipe book open");
+			TestItems.click(context, GROUP_BUTTON_X, craftingY - 3 + 9, InputConstants.MOUSE_BUTTON_LEFT);
+			context.waitTicks(2);
+			check(context.computeOnClient(mc -> GroupPanel.isExpanded() && !mc.player.getRecipeBook().isOpen(RecipeBookType.CRAFTING)),
+				"the group button opens the panel and closes the recipe book");
+			TestItems.click(context, 152 + 10, craftingY + 17 + 9, InputConstants.MOUSE_BUTTON_LEFT);
+			context.waitTicks(2);
+			check(context.computeOnClient(mc -> !GroupPanel.isExpanded() && mc.player.getRecipeBook().isOpen(RecipeBookType.CRAFTING)),
+				"and the recipe book folds the panel in");
+			context.takeScreenshot("simpleme-groups-00-recipe-book");
+			TestItems.click(context, GROUP_BUTTON_X, craftingY - 3 + 9, InputConstants.MOUSE_BUTTON_LEFT);
+			context.waitTicks(2);
+			check(context.computeOnClient(mc -> GroupPanel.isExpanded()), "panel open again");
+			double panelLeft = context.computeOnClient(mc -> TestItems.screen(mc).extraAreas().getFirst().getX());
+			check(panelLeft >= 0, "the panel fits on the screen, left edge " + panelLeft);
+
+			// --- create a group ----------------------------------------------------------------------------
+			TestItems.click(context, PANEL_X + GroupPanel.WIDTH - 36 + 7, 4 + 7, InputConstants.MOUSE_BUTTON_LEFT);
 			context.waitFor(mc -> groups(mc).size() == 1, 40);
 			// the name of the new group is selected: typing replaces it, enter saves it
 			context.getInput().typeChars("Erze");
@@ -169,18 +188,24 @@ public class GroupClientTest implements FabricClientGameTest {
 			context.getInput().typeChars("r");
 			context.waitTicks(2);
 			check(context.computeOnClient(mc -> TestItems.screen(mc).searchText().equals("r")), "R is typed without an item under the mouse");
+			TestItems.click(context, SEARCH_X, SEARCH_Y, InputConstants.MOUSE_BUTTON_RIGHT);
+			context.getInput().pressKey(InputConstants.KEY_RETURN);
 
 			// --- delete the group (two clicks) ----------------------------------------------------------------
 			TestItems.click(context, LIST_X + 90 - 5, 20 + 6, InputConstants.MOUSE_BUTTON_LEFT);
 			context.waitTicks(2);
 			check(context.computeOnClient(mc -> TestItems.screen(mc).groupPanel().isEditing()), "the pencil starts editing");
-			int deleteX = LIST_X + 96 - 23;
+			int deleteX = PANEL_X + GroupPanel.WIDTH - 7 - 23;
 			TestItems.click(context, deleteX, height - 41 + 7, InputConstants.MOUSE_BUTTON_LEFT);
 			context.waitTicks(3);
 			check(context.computeOnClient(mc -> groups(mc).size() == 1), "the first click only asks");
 			TestItems.click(context, deleteX, height - 41 + 7, InputConstants.MOUSE_BUTTON_LEFT);
 			context.waitFor(mc -> groups(mc).isEmpty(), 40);
 			server.runOnServer(s -> check(terminal(s).getStorage().getAmount(ItemVariant.of(Items.ANDESITE)) == 10, "the items stay in the network"));
+			// leave the panel folded in for the tests that run after this one
+			TestItems.click(context, GROUP_BUTTON_X, craftingY - 3 + 9, InputConstants.MOUSE_BUTTON_LEFT);
+			context.waitTicks(2);
+			check(context.computeOnClient(mc -> !GroupPanel.isExpanded()), "folded in");
 			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 		}
 	}

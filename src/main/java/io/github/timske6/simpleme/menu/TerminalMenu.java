@@ -109,6 +109,8 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 	private boolean networkSent;
 	private @Nullable UUID sentNetworkId;
 	private boolean sentNetworkAvailable;
+	/** {@link Networks#version()} of the last network list sent: names and sharing of other networks change too. */
+	private int sentNetworksVersion;
 	private int sentGroupsVersion = -1;
 	private @Nullable UUID sentGroupsNetwork;
 
@@ -118,6 +120,8 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 	private int clientFullSyncs;
 	private final NetworkClientState networkState = new NetworkClientState();
 	private List<GroupListPayload.Entry> clientGroups = List.of();
+	/** Groups of a list that is still arriving (see {@link GroupListPayload}). */
+	private final List<GroupListPayload.Entry> incomingGroups = new ArrayList<>();
 	private int clientGroupsRevision;
 	private int clientSortMode;
 
@@ -266,14 +270,9 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 		return false;
 	}
 
-	/** Client: how this terminal sorts its items (synced from the server, set right away when changed here). */
+	/** Client: how this terminal sorts its items, as last synced from the server (changed with {@link #BUTTON_SORT}). */
 	public int getSortMode() {
 		return Mth.clamp(this.clientSortMode, 0, SORT_MODES - 1);
-	}
-
-	/** Client: the server is told with {@link #BUTTON_SORT}; this shows the new mode before its answer arrives. */
-	public void setClientSortMode(int mode) {
-		this.clientSortMode = mode;
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -292,10 +291,13 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 		}
 		TerminalStorage storage = this.storage();
 		UUID networkId = this.host.getNetworkId();
-		if (!this.networkSent || !Objects.equals(networkId, this.sentNetworkId) || (storage != null) != this.sentNetworkAvailable) {
+		int networksVersion = Networks.get(serverPlayer.level().getServer()).version();
+		if (!this.networkSent || !Objects.equals(networkId, this.sentNetworkId) || (storage != null) != this.sentNetworkAvailable
+			|| networksVersion != this.sentNetworksVersion) {
 			this.networkSent = true;
 			this.sentNetworkId = networkId;
 			this.sentNetworkAvailable = storage != null;
+			this.sentNetworksVersion = networksVersion;
 			NetworkActions.sendList(serverPlayer, this.containerId, networkId);
 		}
 		this.syncGroups(serverPlayer, storage != null ? networkId : null);
@@ -353,12 +355,14 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 		}
 	}
 
+	/** Sends the groups of the network again whenever they changed (or another network is shown). */
 	private void syncGroups(ServerPlayer player, @Nullable UUID network) {
 		ItemGroups groups = ItemGroups.get(player.level().getServer());
-		if (groups.version() == this.sentGroupsVersion && Objects.equals(network, this.sentGroupsNetwork)) {
+		int version = network != null ? groups.version(network) : 0;
+		if (version == this.sentGroupsVersion && Objects.equals(network, this.sentGroupsNetwork)) {
 			return;
 		}
-		this.sentGroupsVersion = groups.version();
+		this.sentGroupsVersion = version;
 		this.sentGroupsNetwork = network;
 		List<GroupListPayload.Entry> entries = new ArrayList<>();
 		if (network != null) {
@@ -367,7 +371,9 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 					group.canManage(player), group.isHiddenFor(player), List.copyOf(group.items())));
 			}
 		}
-		ServerPlayNetworking.send(player, new GroupListPayload(this.containerId, entries));
+		for (GroupListPayload payload : GroupListPayload.split(this.containerId, entries)) {
+			ServerPlayNetworking.send(player, payload);
+		}
 	}
 
 	/** Client: apply a sync packet to the local mirror. */
@@ -400,8 +406,15 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 
 	/** Client: the item groups of the connected network. */
 	public void applyGroups(GroupListPayload payload) {
-		this.clientGroups = payload.groups();
-		this.clientGroupsRevision++;
+		if (payload.first()) {
+			this.incomingGroups.clear();
+		}
+		this.incomingGroups.addAll(payload.groups());
+		if (payload.last()) {
+			this.clientGroups = List.copyOf(this.incomingGroups);
+			this.incomingGroups.clear();
+			this.clientGroupsRevision++;
+		}
 	}
 
 	public List<GroupListPayload.Entry> getClientGroups() {
@@ -524,6 +537,10 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 					case GroupActionPayload.TOGGLE_SHARED -> groups.setShared(group, !group.isShared());
 					case GroupActionPayload.DELETE -> groups.delete(group);
 					case GroupActionPayload.ADD_ITEM -> payload.item().ifPresent(item -> {
+						// only what the player can see: an item of the network, or the one on the cursor
+						if (!this.isKnownItem(item)) {
+							return;
+						}
 						if (!groups.addItem(group, item) && group.items().size() >= ItemGroups.MAX_ITEMS) {
 							player.sendOverlayMessage(Component.translatable("message.simpleme.group.full", ItemGroups.MAX_ITEMS).withStyle(ChatFormatting.RED));
 						}
@@ -534,6 +551,12 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 				}
 			}
 		}
+	}
+
+	private boolean isKnownItem(ItemVariant item) {
+		TerminalStorage storage = this.storage();
+		ItemStack carried = this.getCarried();
+		return (storage != null && storage.getAmount(item) > 0) || (!carried.isEmpty() && item.matches(carried));
 	}
 
 	private static int maxStackSize(ItemVariant variant) {
@@ -912,10 +935,13 @@ public class TerminalMenu extends AbstractCraftingMenu implements NetworkMenu {
 			}
 		}
 
-		while (result.getCount() < amount) {
-			int slot = inventory.findSlotMatchingCraftingIngredient(item, result);
-			if (slot == -1) {
-				break;
+		// like Inventory#findSlotMatchingCraftingIngredient, but never the wireless terminal in use
+		ItemStack locked = this.host != null ? this.host.lockedItem(this.player) : ItemStack.EMPTY;
+		for (int slot = 0; slot < Inventory.INVENTORY_SIZE && result.getCount() < amount; slot++) {
+			ItemStack stack = inventory.getItem(slot);
+			if (stack.isEmpty() || stack == locked || !stack.is(item) || !Inventory.isUsableForCrafting(stack)
+				|| (!result.isEmpty() && !ItemStack.isSameItemSameComponents(result, stack))) {
+				continue;
 			}
 			ItemStack taken = inventory.removeItem(slot, amount - result.getCount());
 			if (result.isEmpty()) {

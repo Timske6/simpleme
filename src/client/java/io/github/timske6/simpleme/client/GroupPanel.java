@@ -31,11 +31,10 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Fold-out panel on the right side of the terminal: item groups of the connected network. Each
+ * Fold-out panel on the left side of the terminal: item groups of the connected network. Each
  * group is a list of item types that stays visible (with 0 when the network has none). Groups are
  * created, renamed, shared and filled here; while a group is edited, items are dragged into it from
  * the storage grid. Every player chooses which groups are shown by clicking their title.
@@ -47,9 +46,6 @@ public final class GroupPanel {
 	private static final int LIST_TOP = 20;
 	private static final int HEADER_HEIGHT = 13;
 	private static final int GROUP_GAP = 3;
-	private static final int TAB_WIDTH = 22;
-	private static final int TAB_HEIGHT = 22;
-	private static final int TAB_Y = 18;
 	private static final int FOOTER_HEIGHT = 72;
 	private static final int COLOR_TEXT = 0xFF404040;
 	private static final int COLOR_SHARED = 0xFF1F4F9F;
@@ -82,6 +78,8 @@ public final class GroupPanel {
 	private int pendingTicks;
 	private String editedName = "";
 	private boolean deleteArmed;
+	/** What the edit buttons show right now, so they are only rebuilt when it changes. */
+	private int buttonState = -1;
 
 	GroupPanel(Minecraft minecraft, TerminalMenu menu, TerminalScreen screen) {
 		this.minecraft = minecraft;
@@ -105,9 +103,9 @@ public final class GroupPanel {
 		this.widgets = List.of(this.newButton, this.closeButton, this.nameBox, this.shareButton, this.deleteButton, this.doneButton);
 	}
 
-	/** Called whenever the terminal moves (opened, resized, recipe book toggled). */
-	void layout(int terminalRight, int top, int height) {
-		this.x = terminalRight + 2;
+	/** Called whenever the terminal moves (opened, resized, recipe book toggled). The panel is on its left. */
+	void layout(int terminalLeft, int top, int height) {
+		this.x = terminalLeft - 2 - WIDTH;
 		this.y = top;
 		this.height = height;
 		this.newButton.setPosition(this.x + WIDTH - 36, this.y + 4);
@@ -142,14 +140,13 @@ public final class GroupPanel {
 		return expanded && this.editing != null;
 	}
 
-	/** Where the panel (or its tab) is, so recipe viewers keep their item lists out of the way. */
-	public Rect2i area() {
-		return expanded ? new Rect2i(this.x, this.y, WIDTH, this.height) : new Rect2i(this.x - 2, this.y + TAB_Y, TAB_WIDTH + 2, TAB_HEIGHT);
+	/** Where the open panel is (so recipe viewers keep their item lists out of the way), {@code null} while folded in. */
+	public @Nullable Rect2i area() {
+		return expanded ? new Rect2i(this.x, this.y, WIDTH, this.height) : null;
 	}
 
-	private boolean isOverPanel(double mouseX, double mouseY) {
-		Rect2i area = this.area();
-		return area.contains((int) Math.floor(mouseX), (int) Math.floor(mouseY));
+	boolean isOver(double mouseX, double mouseY) {
+		return expanded && mouseX >= this.x && mouseX < this.x + WIDTH && mouseY >= this.y && mouseY < this.y + this.height;
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -273,6 +270,12 @@ public final class GroupPanel {
 	private void updateButtons() {
 		GroupListPayload.Entry edited = this.group(this.editing);
 		boolean shared = edited != null && edited.shared();
+		this.newButton.active = this.menu.networkState().current() != null;
+		int state = (edited != null ? 1 : 0) | (shared ? 2 : 0) | (this.deleteArmed ? 4 : 0);
+		if (state == this.buttonState) {
+			return;
+		}
+		this.buttonState = state;
 		this.shareButton.active = edited != null;
 		this.shareButton.setMessage(Component.translatable(shared ? "gui.simpleme.group.make_private" : "gui.simpleme.group.share"));
 		this.shareButton.setTooltip(Tooltip.create(Component.translatable(shared ? "gui.simpleme.group.make_private.tooltip" : "gui.simpleme.group.share.tooltip")));
@@ -280,7 +283,6 @@ public final class GroupPanel {
 		this.deleteButton.setMessage(Component.translatable(this.deleteArmed ? "gui.simpleme.group.delete_confirm" : "gui.simpleme.group.delete")
 			.withStyle(this.deleteArmed ? ChatFormatting.RED : ChatFormatting.RESET));
 		this.deleteButton.setTooltip(Tooltip.create(Component.translatable("gui.simpleme.group.delete.tooltip")));
-		this.newButton.active = this.menu.networkState().current() != null;
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -372,7 +374,7 @@ public final class GroupPanel {
 
 	/** Whether a dragged item would land in the edited group. */
 	boolean isDropTarget(double mouseX, double mouseY) {
-		return this.isEditing() && this.isOverPanel(mouseX, mouseY) && mouseY < this.footerTop();
+		return this.isEditing() && this.isOver(mouseX, mouseY) && mouseY < this.footerTop();
 	}
 
 	private ItemStack stack(ItemVariant variant) {
@@ -394,7 +396,6 @@ public final class GroupPanel {
 
 	void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a, boolean dragging) {
 		if (!expanded) {
-			this.extractTab(graphics, mouseX, mouseY);
 			return;
 		}
 		TerminalScreen.drawPanel(graphics, this.x, this.y, WIDTH, this.height);
@@ -446,18 +447,6 @@ public final class GroupPanel {
 		if (hovered != null && this.menu.getCarried().isEmpty() && !dragging) {
 			this.extractHitTooltip(graphics, hovered, mouseX, mouseY);
 		}
-	}
-
-	private void extractTab(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-		int tabX = this.x - 2;
-		int tabY = this.y + TAB_Y;
-		TerminalScreen.drawPanel(graphics, tabX, tabY, TAB_WIDTH + 2, TAB_HEIGHT);
-		boolean hovered = this.isOverPanel(mouseX, mouseY);
-		if (hovered) {
-			graphics.fill(tabX + 3, tabY + 3, tabX + TAB_WIDTH - 1, tabY + TAB_HEIGHT - 3, 0x40FFFFFF);
-			graphics.setTooltipForNextFrame(this.font, Component.translatable("gui.simpleme.group.open"), mouseX, mouseY);
-		}
-		graphics.item(new ItemStack(Items.CHEST), tabX + 4, tabY + 3);
 	}
 
 	private void extractGroup(GuiGraphicsExtractor graphics, GroupListPayload.Entry group, int left, int top, @Nullable Hit hovered, int mouseX, boolean dragging) {
@@ -573,14 +562,8 @@ public final class GroupPanel {
 			this.nameBox.setFocused(false);
 			this.commitName();
 		}
-		if (!this.isOverPanel(mouseX, mouseY)) {
+		if (!this.isOver(mouseX, mouseY)) {
 			return false;
-		}
-		if (!expanded) {
-			if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
-				this.setExpanded(true);
-			}
-			return true;
 		}
 		if (this.deleteArmed && !this.deleteButton.isMouseOver(mouseX, mouseY)) {
 			this.deleteArmed = false;
@@ -639,7 +622,7 @@ public final class GroupPanel {
 	}
 
 	boolean mouseScrolled(double mouseX, double mouseY, double scrollY) {
-		if (!expanded || !this.isOverPanel(mouseX, mouseY)) {
+		if (!this.isOver(mouseX, mouseY)) {
 			return false;
 		}
 		this.scrollRemainder += scrollY * 18;

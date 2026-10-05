@@ -5,7 +5,9 @@ import com.mojang.serialization.DataResult;
 import com.mojang.serialization.Dynamic;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import io.github.timske6.simpleme.SimpleME;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,12 +50,18 @@ public final class ItemGroups extends SavedData {
 		UUIDUtil.CODEC.listOf().optionalFieldOf("hidden_by", List.of()).forGetter(group -> List.copyOf(group.hiddenBy))
 	).apply(instance, Group::new));
 
-	private static final Codec<ItemGroups> CODEC = GROUP_CODEC.listOf().xmap(ItemGroups::fromList, groups -> List.copyOf(groups.groups.values()));
+	/** A group that fails to load is skipped (and logged) instead of losing all groups of the world. */
+	private static final Codec<List<Group>> LENIENT_GROUPS = Codec.of(
+		GROUP_CODEC.listOf(),
+		Codec.PASSTHROUGH.listOf().map(ItemGroups::decodeGroups)
+	);
+	/** The file format (public for tests and tools). */
+	public static final Codec<ItemGroups> CODEC = LENIENT_GROUPS.xmap(ItemGroups::fromList, groups -> List.copyOf(groups.groups.values()));
 	private static final SavedDataType<ItemGroups> TYPE = new SavedDataType<>(SimpleME.id("groups"), ItemGroups::new, CODEC, null);
 
 	private final Map<UUID, Group> groups = new LinkedHashMap<>();
-	/** Changes with every change, so open terminals know when to send the groups again. Not saved. */
-	private int version;
+	/** Per network: changes with every change of its groups, so open terminals know when to send them again. Not saved. */
+	private final Object2IntOpenHashMap<UUID> versions = new Object2IntOpenHashMap<>();
 
 	public ItemGroups() {
 	}
@@ -64,6 +72,14 @@ public final class ItemGroups extends SavedData {
 			data.groups.put(group.id(), group);
 		}
 		return data;
+	}
+
+	private static List<Group> decodeGroups(List<Dynamic<?>> values) {
+		List<Group> groups = new ArrayList<>(values.size());
+		for (Dynamic<?> value : values) {
+			GROUP_CODEC.parse(value).resultOrPartial(error -> SimpleME.LOGGER.warn("Skipping unreadable item group: {}", error)).ifPresent(groups::add);
+		}
+		return groups;
 	}
 
 	private static List<ItemVariant> decodeEach(List<Dynamic<?>> values) {
@@ -79,12 +95,13 @@ public final class ItemGroups extends SavedData {
 		return server.getDataStorage().computeIfAbsent(TYPE);
 	}
 
-	public int version() {
-		return this.version;
+	/** Changes whenever a group of the network changes (created, renamed, shared, filled, shown or hidden, deleted). */
+	public int version(UUID network) {
+		return this.versions.getInt(network);
 	}
 
-	private void changed() {
-		this.version++;
+	private void changed(UUID network) {
+		this.versions.addTo(network, 1);
 		this.setDirty();
 	}
 
@@ -97,6 +114,17 @@ public final class ItemGroups extends SavedData {
 		List<Group> list = new ArrayList<>();
 		for (Group group : this.groups.values()) {
 			if (group.network().equals(network) && group.canSee(player)) {
+				list.add(group);
+			}
+		}
+		return list;
+	}
+
+	/** All groups of a network, no matter who may see them. */
+	public List<Group> all(UUID network) {
+		List<Group> list = new ArrayList<>();
+		for (Group group : this.groups.values()) {
+			if (group.network().equals(network)) {
 				list.add(group);
 			}
 		}
@@ -120,29 +148,29 @@ public final class ItemGroups extends SavedData {
 		}
 		Group group = new Group(id, network, cleanName(name), owner.getUUID(), owner.getPlainTextName(), false, List.of(), List.of());
 		this.groups.put(id, group);
-		this.changed();
+		this.changed(network);
 		return group;
 	}
 
 	public void rename(Group group, String name) {
 		group.name = cleanName(name);
-		this.changed();
+		this.changed(group.network());
 	}
 
 	public void setShared(Group group, boolean shared) {
 		group.shared = shared;
-		this.changed();
+		this.changed(group.network());
 	}
 
 	public void delete(Group group) {
 		this.groups.remove(group.id());
-		this.changed();
+		this.changed(group.network());
 	}
 
 	/** Groups of a deleted network go with it. */
 	public void deleteNetwork(UUID network) {
 		if (this.groups.values().removeIf(group -> group.network().equals(network))) {
-			this.changed();
+			this.changed(network);
 		}
 	}
 
@@ -151,20 +179,20 @@ public final class ItemGroups extends SavedData {
 			return false;
 		}
 		group.items.add(item);
-		this.changed();
+		this.changed(group.network());
 		return true;
 	}
 
 	public void removeItem(Group group, ItemVariant item) {
 		if (group.items.remove(item)) {
-			this.changed();
+			this.changed(group.network());
 		}
 	}
 
 	/** Every player picks for themselves which of the groups they see are shown. */
 	public void setHidden(Group group, Player player, boolean hidden) {
 		if (hidden ? group.hiddenBy.add(player.getUUID()) : group.hiddenBy.remove(player.getUUID())) {
-			this.changed();
+			this.changed(group.network());
 		}
 	}
 
@@ -218,8 +246,9 @@ public final class ItemGroups extends SavedData {
 			return this.shared;
 		}
 
+		/** Read only; changed through {@link ItemGroups#addItem} and {@link ItemGroups#removeItem}. */
 		public List<ItemVariant> items() {
-			return this.items;
+			return Collections.unmodifiableList(this.items);
 		}
 
 		public boolean isHiddenFor(Player player) {

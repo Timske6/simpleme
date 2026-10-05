@@ -21,7 +21,7 @@ Quellcode und Fehlermeldungen: https://github.com/Timske6/simpleme
   Große Mengen werden kompakt angezeigt (z. B. `12.3k`, `1.5M`), die genaue Zahl steht im Tooltip.
   Die Reihenfolge bleibt stehen, solange das Terminal offen ist: Beim Herausnehmen springt nichts herum,
   eine leer genommene Sorte zeigt `0`. Neu sortiert (und leere Sorten entfernt) wird beim nächsten Öffnen.
-- **Gruppen**: ein ausklappbares Menü rechts am Terminal und Funk-Terminal (siehe [Gruppen](#gruppen)).
+- **Gruppen**: ein ausklappbares Menü links am Terminal und Funk-Terminal (siehe [Gruppen](#gruppen)).
   Wichtige Items bleiben dort immer sichtbar, auch wenn gerade keine im Netzwerk sind.
 - **Crafting direkt aus dem Netzwerk**:
   - 3×3-Werkbank im Terminal. Nach jedem Craft füllt sich das Raster automatisch aus dem Netzwerk nach.
@@ -79,7 +79,9 @@ verbindet die Kiste mit dem Netzwerk des Funk-Terminals. Der Tooltip zeigt jewei
 
 ## Gruppen
 
-Der Truhen-Reiter rechts am Terminal klappt das Gruppen-Menü auf (`×` klappt es wieder ein):
+Der Truhen-Knopf über dem Rezeptbuch-Knopf klappt das Gruppen-Menü links neben dem Terminal auf (`×` oder
+nochmal der Knopf klappt es wieder ein). Rezeptbuch und Gruppen teilen sich die linke Seite: Öffnet man das eine,
+klappt das andere zu.
 
 - **`+`** legt eine neue Gruppe an. Der Name ist gleich markiert: einfach lostippen, Enter speichert.
 - **Stift** (✎) neben dem Gruppennamen: Gruppe bearbeiten. Dann gilt:
@@ -121,7 +123,7 @@ aus Version 1.0, sobald sie platziert werden. Es geht dabei nichts verloren.
 | Mausrad über dem Raster | Scrollen |
 | Netzwerk-Knopf (oben links) | Netzwerk wählen, anlegen, umbenennen, teilen oder löschen |
 | Sortier-Knopf (oben rechts) | Name / Anzahl / Mod, jedes Terminal merkt sich seine Sortierung |
-| Truhen-Reiter (rechts) | Gruppen-Menü auf- und zuklappen |
+| Truhen-Knopf (über dem Rezeptbuch-Knopf) | Gruppen-Menü links auf- und zuklappen |
 
 Die Anzahl der sichtbaren Zeilen passt sich der Fensterhöhe an (3 bis 8 Zeilen).
 

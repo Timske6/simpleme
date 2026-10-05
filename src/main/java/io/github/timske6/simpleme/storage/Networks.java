@@ -38,6 +38,8 @@ public final class Networks extends SavedData {
 	private static final SavedDataType<Networks> TYPE = new SavedDataType<>(SimpleME.id("networks"), Networks::new, CODEC, null);
 
 	private final Map<UUID, Network> networks = new LinkedHashMap<>();
+	/** Changes with every change (not saved), so open menus send the network list again. */
+	private int version;
 
 	public Networks() {
 	}
@@ -57,6 +59,16 @@ public final class Networks extends SavedData {
 	/** The storage of a network, or {@code null} if the network does not exist (any more). No access check. */
 	public static @Nullable TerminalStorage storage(MinecraftServer server, @Nullable UUID id) {
 		return id != null && get(server).find(id) != null ? StorageData.get(server, id).storage() : null;
+	}
+
+	public int version() {
+		return this.version;
+	}
+
+	@Override
+	public void setDirty() {
+		super.setDirty();
+		this.version++;
 	}
 
 	public @Nullable Network find(@Nullable UUID id) {

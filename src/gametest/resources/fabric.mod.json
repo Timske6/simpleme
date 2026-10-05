@@ -11,13 +11,15 @@
 			"io.github.timske6.simpleme.test.LinkedStorageClientTest",
 			"io.github.timske6.simpleme.test.TerminalDedicatedServerTest",
 			"io.github.timske6.simpleme.test.JeiTransferClientTest",
-			"io.github.timske6.simpleme.test.GroupClientTest"
+			"io.github.timske6.simpleme.test.GroupClientTest",
+			"io.github.timske6.simpleme.test.MultiplayerClientTest"
 		],
 		"jei_mod_plugin": [
 			"io.github.timske6.simpleme.test.TestJeiPlugin"
 		],
 		"fabric-gametest": [
-			"io.github.timske6.simpleme.test.TerminalGameTests"
+			"io.github.timske6.simpleme.test.TerminalGameTests",
+			"io.github.timske6.simpleme.test.MultiplayerGameTests"
 		]
 	},
 	"depends": {
